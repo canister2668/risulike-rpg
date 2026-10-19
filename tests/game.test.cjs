@@ -84,7 +84,7 @@ test('UTF-8 transfer roundtrip',async t=>harness(t,`
 `));
 test('UI builds and main menu renders standalone',async t=>harness(t,`
  await initRPG(); assert.ok(document.getElementById(RPG_UI_ID));
- assert.ok(document.body.textContent.includes('0.1')); assert.equal(errors.length,0,errors.join(" | "));
+ assert.ok(document.body.textContent.includes('0.2')); assert.equal(errors.length,0,errors.join(" | "));
 `));
 test('all enemy templates scale across six difficulties and ten floors',async t=>harness(t,setup+`
  for(gameDifficulty=1;gameDifficulty<=6;gameDifficulty++) for(let floor=1;floor<=10;floor++) {

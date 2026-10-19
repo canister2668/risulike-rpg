@@ -1,7 +1,7 @@
 //@name Risulike RPG
-//@display-name ⚔️ 리스라이크 던전 RPG (DnD Edition) v0.1
+//@display-name ⚔️ 리스라이크 던전 RPG (DnD Edition) v0.2
 //@api 3.0
-//@version 0.1
+//@version 0.2
 //@arg rpg_player string "" "플레이어 세이브 데이터"
 //@arg rpg_gameState string "" "게임 상태 세이브 데이터"
 
@@ -12970,7 +12970,7 @@ function render() {
     if(_headerEl){
         var _hft2=(gameState&&gameState.floor&&gameState.running!==false)?getFloorTheme(gameState.floor):null;
                 var _aImg=(ENEMY_PORTRAITS&&ENEMY_PORTRAITS.airisu)?"<img src=\""+ENEMY_PORTRAITS.airisu+"\" width=\"20\" height=\"20\" style=\"border-radius:50%;vertical-align:middle;margin-right:4px;border:1px solid rgba(135,206,250,0.5);\">":" ";
-        _headerEl.innerHTML=_aImg+' v0.1'+(_hft2?' <span style="font-size:10px;color:'+_hft2.color+';">'+_hft2.icon+' '+gameState.floor+'F</span>':'');
+        _headerEl.innerHTML=_aImg+' v0.2'+(_hft2?' <span style="font-size:10px;color:'+_hft2.color+';">'+_hft2.icon+' '+gameState.floor+'F</span>':'');
     }
     if(selectingDifficulty){
         body.innerHTML=renderDifficultySelect();
@@ -15541,7 +15541,7 @@ function createUI() {
     if(!document.getElementById(RPG_UI_ID)){
         var win=document.createElement("div");win.id=RPG_UI_ID;
         win.innerHTML='<div class="rpg-header" id="rpg-drag-header">'+
-            (function(){var _hft=(gameState&&gameState.floor&&gameState.running!==false)?getFloorTheme(gameState.floor):null;return '<div class="rpg-header-title">⚔️ v0.1'+(_hft?' <span style="font-size:10px;color:'+_hft.color+';">'+_hft.icon+' '+gameState.floor+'F</span>':'')+'</div>';})()+
+            (function(){var _hft=(gameState&&gameState.floor&&gameState.running!==false)?getFloorTheme(gameState.floor):null;return '<div class="rpg-header-title">⚔️ v0.2'+(_hft?' <span style="font-size:10px;color:'+_hft.color+';">'+_hft.icon+' '+gameState.floor+'F</span>':'')+'</div>';})()+
             '<div style="display:flex;gap:6px;">'+
             '<button class="rpg-header-btn" id="rpg-scale-btn" title="UI 확대">'+(_uiScale===3?'🖥️':_uiScale===2?'🔍':'🔎')+'</button>'+
             '<button class="rpg-header-btn" id="rpg-grave-btn" title="묘지">🪦</button>'+
@@ -16699,7 +16699,7 @@ async function showRpgContainer() {
 }
 
 async function initRPG() {
-    console.log(PLUGIN_NAME+" 초기화 (v0.1, API 3.0)", _hasRisu ? "[Risu 환경]" : "[독립 실행]");
+    console.log(PLUGIN_NAME+" 초기화 (v0.2, API 3.0)", _hasRisu ? "[Risu 환경]" : "[독립 실행]");
 
     // onUnload 미지원 호스트에서도 초기화와 버튼 등록은 계속한다.
     if (_hasRisu) {
