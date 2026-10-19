@@ -271,3 +271,18 @@ test('run summary on clear screen and standalone share UI',async t=>harness(t,se
  const html=renderEnding(); assert.ok(html.includes('rpg_copyRunSummary')); assert.ok(!html.includes('rpg_attachRunSummary'));
  await assert.rejects(attachJourneyContext(text));
 `));
+test('run result card draws key stats and exports PNG without network',async t=>harness(t,setup+`
+ const texts=[]; let drew=0;
+ const ctx=new Proxy({},{get:(o,k)=>k==='fillText'?(s=>texts.push(String(s))):k==='createLinearGradient'?(()=>({addColorStop(){}})):k==='drawImage'?(()=>{drew++}):(o[k]!==undefined?o[k]:function(){}),set:(o,k,v)=>{o[k]=v;return true}});
+ player.killCount=9; gameState.floor=5; player.equipped.weapon1={name:'신화검',icon:'🗡️',rarity:'mythic'};
+ _lastRunGrave={killedByName:'골렘',killedByIcon:'🗿',skillName:'분쇄',lastDamage:33};
+ drawRunCard(ctx,getRunHighlights(),null);
+ const all=texts.join('|'); for(const s of ['GAME OVER',player.name,'5층','9마리','신화검','골렘']) assert.ok(all.includes(s),s);
+ HTMLCanvasElement.prototype.getContext=function(){return ctx}; HTMLCanvasElement.prototype.toDataURL=function(type){assert.equal(type,'image/png');return 'data:image/png;base64,TEST'};
+ window.Image=function(){const self=this;window.setTimeout(()=>self.onload&&self.onload(),0)};
+ let fetched=0; window.fetch=()=>{fetched++}; window.XMLHttpRequest=function(){fetched++};
+ await rpg_makeRunCard(); assert.equal(_runShare.dataUrl,'data:image/png;base64,TEST'); assert.equal(drew,1); assert.equal(fetched,0);
+ const panel=renderRunShareSection(); assert.ok(panel.includes('rpg_downloadRunCard')); assert.ok(panel.includes('길게'));
+ let clicked=0; HTMLAnchorElement.prototype.click=function(){clicked++; assert.ok(this.download.endsWith('.png'))};
+ rpg_downloadRunCard(); assert.equal(clicked,1);
+`));

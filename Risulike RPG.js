@@ -16902,11 +16902,14 @@ function renderRunShareSection() {
         (_hasRisu ? (_journeyCtxText ?
             '<button ' + btn + 'background:rgba(104,211,145,0.12);border:1px solid rgba(104,211,145,0.4);color:#68d391;" data-action="rpg_cancelJourneyContext">📎 첨부 대기 · 취소</button>' :
             '<button ' + btn + 'background:rgba(154,128,255,0.12);border:1px solid rgba(154,128,255,0.4);color:#c4b5fd;" data-action="rpg_attachRunSummary">💬 다음 채팅에 첨부</button>') : '') +
+        '<button ' + btn + 'background:rgba(99,179,237,0.12);border:1px solid rgba(99,179,237,0.4);color:#90cdf4;" data-action="rpg_makeRunCard">🖼️ 결과 카드</button>' +
         '</div>';
     if (_journeyCtxText) html += '<div style="font-size:10px;color:#68d391;margin-top:6px;">다음 채팅 요청 1회에 이 일지가 문맥으로 붙습니다. 카드에는 저장되지 않습니다.</div>';
     if (_runShare && _runShare.mode === "text") {
-        html += '<textarea id="rpg-run-summary" readonly style="width:100%;height:140px;margin-top:6px;background:rgba(0,0,0,0.4);color:#fff;border:1px solid rgba(251,211,141,0.4);border-radius:6px;font-size:10px;padding:6px;resize:none;box-sizing:border-box;">' + escHtml(_runShare.text) + '</textarea>';
+        html += '<textarea id="rpg-run-summary" readonly style="width:100%;height:140px;margin-top:6px;background:rgba(0,0,0,0.4);color:#fff;border:1px solid rgba(251,211,141,0.4);border-radius:6px;font-size:10px;padding:6px;resize:none;box-sizing:border-box;">' + escHtml(_runShare.text) + '</textarea>' +
+            '<button class="rpg-btn full" style="margin-top:4px;padding:6px;font-size:11px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.2);color:#e2e8f0;" data-action="rpg_closeRunShare">✕ 닫기</button>';
     }
+    html += renderRunCardPanel();
     return html + '</div>';
 }
 window.rpg_copyRunSummary = async function(){
@@ -16931,6 +16934,103 @@ window.rpg_cancelJourneyContext = async function(){
     try { await clearJourneyContext(); } catch(e) { console.warn(PLUGIN_NAME, "일지 첨부 해제 실패:", e); }
     showToast("📎 첨부를 취소했어요."); render();
 };
+
+// ═══ 런 결과 카드 이미지 (canvas → PNG, 외부 업로드 없음) ═══
+var RUN_CARD_W = 540, RUN_CARD_H = 720;
+function _cardClip(s, n) { s = String(s || ""); return s.length > n ? s.slice(0, n - 1) + "…" : s; }
+function drawRunCard(ctx, h, portrait) {
+    var W = RUN_CARD_W, H = RUN_CARD_H, accent = h.clear ? "#ffd700" : "#fc8181";
+    var bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, h.clear ? "#2a2410" : "#2a1418"); bg.addColorStop(1, "#12121e");
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = accent; ctx.lineWidth = 4; ctx.strokeRect(10, 10, W - 20, H - 20);
+    ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.font = "16px sans-serif";
+    ctx.fillText("⚔️ 리스라이크 던전 RPG", W / 2, 48);
+    ctx.fillStyle = accent; ctx.font = "bold 38px sans-serif";
+    ctx.fillText(h.clear ? "🏆 던전 정복" : "💀 GAME OVER", W / 2, 96);
+    if (portrait) {
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(portrait, W / 2 - 80, 118, 160, 160);
+        ctx.strokeStyle = "rgba(255,255,255,0.3)"; ctx.lineWidth = 2; ctx.strokeRect(W / 2 - 80, 118, 160, 160);
+    } else {
+        ctx.font = "96px sans-serif"; ctx.fillStyle = "#fff"; ctx.fillText(h.classIcon || "⚔️", W / 2, 230);
+    }
+    ctx.fillStyle = "#fff"; ctx.font = "bold 28px sans-serif";
+    ctx.fillText(_cardClip(h.classIcon + " " + h.className, 22) + "  Lv." + h.level, W / 2, 318);
+    ctx.fillStyle = "rgba(255,255,255,0.7)"; ctx.font = "18px sans-serif";
+    ctx.fillText("난이도 " + h.difficultyIcon + " " + h.difficulty + (h.cycle > 0 ? " · " + (h.cycle + 1) + "주차" : ""), W / 2, 348);
+    var stats = [["도달 층", h.floor + "층"], ["처치", h.kills + "마리"], ["탐험", h.rooms + "방"], ["골드", h.gold + "G"]];
+    ctx.textAlign = "left";
+    for (var i = 0; i < stats.length; i++) {
+        var x = 40 + (i % 2) * 240, y = 390 + Math.floor(i / 2) * 44;
+        ctx.fillStyle = "rgba(255,255,255,0.08)"; ctx.fillRect(x, y - 28, 220, 38);
+        ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.font = "15px sans-serif"; ctx.fillText(stats[i][0], x + 12, y - 4);
+        ctx.fillStyle = "#fff"; ctx.font = "bold 20px sans-serif"; ctx.textAlign = "right"; ctx.fillText(stats[i][1], x + 208, y - 3); ctx.textAlign = "left";
+    }
+    ctx.fillStyle = accent; ctx.font = "bold 17px sans-serif"; ctx.fillText("주요 장비", 40, 500);
+    if (!h.equips.length) { ctx.fillStyle = "rgba(255,255,255,0.4)"; ctx.font = "16px sans-serif"; ctx.fillText("(없음)", 40, 528); }
+    for (var j = 0; j < h.equips.length; j++) {
+        var e = h.equips[j];
+        ctx.fillStyle = (EQUIP_RARITIES[e.rarity] && EQUIP_RARITIES[e.rarity].color) || "#fff"; ctx.font = "17px sans-serif";
+        ctx.fillText(_cardClip(e.icon + " " + e.name, 28), 40, 528 + j * 28);
+    }
+    ctx.textAlign = "center";
+    if (h.killedBy) {
+        ctx.fillStyle = "#fc8181"; ctx.font = "16px sans-serif";
+        ctx.fillText(_cardClip("☠️ " + _plainText(h.killedBy.enemyName) + "의 " + _plainText(h.killedBy.skillName || "공격") + " · " + (h.killedBy.damage || 0) + " 피해", 34), W / 2, 660);
+    }
+    var now = new Date();
+    ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.font = "13px sans-serif";
+    ctx.fillText(now.getFullYear() + "." + (now.getMonth() + 1) + "." + now.getDate() + " · RisuAI 플러그인", W / 2, 692);
+}
+function _loadRunCardPortrait(h) {
+    var src = (h.gender === "male" && CLASS_PORTRAITS_MALE && CLASS_PORTRAITS_MALE[h.classKey]) ? CLASS_PORTRAITS_MALE[h.classKey] : CLASS_PORTRAITS_FEMALE[h.classKey];
+    if (!src || src.length < 10 || typeof Image === "undefined") return Promise.resolve(null);
+    return new Promise(function(resolve) {
+        var done = false, img = new Image();
+        function finish(v) { if (!done) { done = true; resolve(v); } }
+        img.onload = function(){ finish(img); };
+        img.onerror = function(){ finish(null); };
+        setTimeout(function(){ finish(null); }, 1500);
+        img.src = src; // 내장 data: URL — canvas를 오염시키지 않는다
+    });
+}
+async function makeRunCardDataUrl() {
+    var h = getRunHighlights();
+    if (!h) return null;
+    var canvas = document.createElement("canvas");
+    canvas.width = RUN_CARD_W; canvas.height = RUN_CARD_H;
+    var ctx = null;
+    try { ctx = canvas.getContext("2d"); } catch(e) { ctx = null; }
+    if (!ctx) return null;
+    drawRunCard(ctx, h, await _loadRunCardPortrait(h));
+    try { return canvas.toDataURL("image/png"); } catch(e2) { return null; }
+}
+function renderRunCardPanel() {
+    if (!_runShare || _runShare.mode !== "image" || !_runShare.dataUrl) return "";
+    return '<div style="margin-top:8px;text-align:center;">' +
+        '<img src="' + _runShare.dataUrl + '" alt="런 결과 카드" style="width:100%;max-width:270px;display:block;margin:0 auto;border-radius:8px;border:1px solid rgba(255,255,255,0.2);-webkit-touch-callout:default;-webkit-user-select:auto;user-select:auto;" />' +
+        '<div style="font-size:10px;color:rgba(255,255,255,0.5);margin:6px 0;">다운로드가 안 되면 이미지를 길게 누르거나(모바일) 우클릭해서 저장하세요.</div>' +
+        '<div style="display:flex;gap:4px;"><button class="rpg-btn" style="flex:1;padding:6px;font-size:11px;background:rgba(99,179,237,0.15);border:1px solid rgba(99,179,237,0.4);color:#90cdf4;" data-action="rpg_downloadRunCard">⬇️ PNG 다운로드</button>' +
+        '<button class="rpg-btn" style="flex:1;padding:6px;font-size:11px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.2);color:#e2e8f0;" data-action="rpg_closeRunShare">✕ 닫기</button></div></div>';
+}
+window.rpg_makeRunCard = async function(){
+    var url = await makeRunCardDataUrl();
+    if (!url) { showToast("이 환경에서는 결과 카드를 만들 수 없어요."); return; }
+    _runShare = { mode:"image", dataUrl:url };
+    render();
+};
+window.rpg_downloadRunCard = function(){
+    if (!_runShare || !_runShare.dataUrl) return;
+    try {
+        var a = document.createElement("a");
+        a.href = _runShare.dataUrl; a.download = "risulike-run-" + Date.now() + ".png";
+        document.body.appendChild(a); a.click(); a.remove();
+        showToast("⬇️ 저장을 시도했어요. 막히면 이미지를 길게 눌러 저장하세요.");
+    } catch(e) { showToast("다운로드가 막혔어요. 이미지를 길게 눌러 저장하세요."); }
+};
+window.rpg_closeRunShare = function(){ _runShare = null; render(); };
 
 // ═══════════════════════════════════════
 //  RPG ↔ Bot Bridge (pluginStorage 방식)
