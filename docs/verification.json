@@ -1,0 +1,18 @@
+{
+  "release": "0.1",
+  "sourceVersion": "9.1.4",
+  "sourceSha256": "bfeda5ac9bdabe48b932a2e9c87b7ee638083bc850a77887cc9253b267ab04a8",
+  "file": "Risulike RPG.js",
+  "sha256": "14b0299527c0505930be3f607c9dfcdc3d7c05f600ef5a564d0a746ab2f359c6",
+  "embeddedImages": 445,
+  "invalidImages": [],
+  "officialSourceRevision": "454e5e207747399f43a4788f5f08ecd5aa291550",
+  "tests": 21,
+  "passed": 21,
+  "baselinePassed": 8,
+  "baselineFailed": 13,
+  "browserStatus": "blocked: libpixman-1.so.0 missing; browser smoke test not executed",
+  "stockHostIntegration": "not executed",
+  "liveChanges": false,
+  "removedBrokenImage": "PASSIVE_PORTRAITS.trueSight; truncated WebP; existing fallback used"
+}

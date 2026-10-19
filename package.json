@@ -1,0 +1,24 @@
+{
+  "name": "risulike-rpg",
+  "version": "0.1.0",
+  "description": "RisuAI API v3 dungeon RPG plugin",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "node --test tests/game.test.cjs",
+    "lint": "eslint \"Risulike RPG.js\"",
+    "check": "node --check \"Risulike RPG.js\" && npm run lint && npm test",
+    "test:browser": "node tests/browser.cjs"
+  },
+  "keywords": [],
+  "author": "",
+  "devDependencies": {
+    "eslint": "^9.39.5",
+    "globals": "^16.5.0",
+    "jsdom": "^26.1.0",
+    "playwright": "^1.64.1"
+  },
+  "private": true
+}
