@@ -11619,6 +11619,7 @@ async function saveGraveyard() {
 }
 
 function addGraveyardEntry(entry) {
+    _lastRunGrave = entry;
     // Find first unlocked empty slot, or oldest unlocked entry
     if (_graveyard.length < 10) {
         _graveyard.push(entry);
@@ -11700,6 +11701,7 @@ function startNewGame() {
     _playerMutations = [];
     _journeyLog = [];
     refreshBotCharacter();
+    _runShare = null; _lastRunGrave = null;
     selectingDifficulty=true; selectingClass=false; player=null; gameState=null; currentEnemy=null; battlePhase="";
     _pendingClassKey = null;
     // 모든 오버레이/팝업 닫기
@@ -15428,7 +15430,7 @@ function renderGameOver() {
         '<div class="rpg-stat-row"><span class="rpg-stat-label">처치</span><span class="rpg-stat-val">'+player.killCount+'마리</span></div>' +
         '<div class="rpg-stat-row"><span class="rpg-stat-label">탐험 방</span><span class="rpg-stat-val">🚪 '+(gameState.totalTurns||0)+'방</span></div>' +
         '<div class="rpg-stat-row"><span class="rpg-stat-label">골드</span><span class="rpg-stat-val">'+player.gold+'G</span></div>' +
-        '</div><button class="rpg-btn new-game full" data-action="rpg_newGame">🔄 다시 도전</button></div>';
+        '</div>' + renderRunShareSection() + '<button class="rpg-btn new-game full" data-action="rpg_newGame">🔄 다시 도전</button></div>';
 }
 
 function renderEnding() {
@@ -15446,7 +15448,7 @@ function renderEnding() {
         '<div class="rpg-stat-row"><span class="rpg-stat-label">처치</span><span class="rpg-stat-val">'+player.killCount+'마리</span></div>'+
         '<div class="rpg-stat-row"><span class="rpg-stat-label">탐험 방</span><span class="rpg-stat-val">🚪 '+(gameState.totalTurns||0)+'방</span></div>'+
         '<div class="rpg-stat-row"><span class="rpg-stat-label">골드</span><span class="rpg-stat-val">'+player.gold+'G</span></div>'+
-        '</div><button class="rpg-btn new-game full" data-action="rpg_newGame">🎮 새 게임</button></div>';
+        '</div>'+renderRunShareSection()+'<button class="rpg-btn new-game full" data-action="rpg_newGame">🎮 새 게임</button></div>';
 }
 
 // ═══════════════════════════════════════
@@ -16619,6 +16621,7 @@ async function initRPG() {
                 clearInterval(_iconWatchTimer);
                 if (_audioCtx) await _audioCtx.close();
                 await clearRestContext();
+                await clearJourneyContext();
             });
         } catch(e) { console.warn(PLUGIN_NAME, "onUnload 등록 실패:", e); }
     }
@@ -16799,6 +16802,135 @@ function renderBotSummonPanel() {
 }
 window.rpg_summonBotAlly = async function(){ await refreshBotCharacter(); if (!_botChar) { showToast("현재 채팅 캐릭터를 찾을 수 없어요."); render(); return; } summonBotAlly(); };
 window.rpg_summonBotBoss = async function(){ await refreshBotCharacter(); if (!_botChar) { showToast("현재 채팅 캐릭터를 찾을 수 없어요."); render(); return; } summonBotBoss(); };
+
+// ═══════════════════════════════════════
+//  런 결과 공유: 모험 일지 요약 · 다음 채팅 1회 첨부
+// ═══════════════════════════════════════
+var _lastRunGrave = null;   // 이번 사망으로 추가한 묘지 기록
+var _runShare = null;       // { mode:"text", text } | { mode:"image", dataUrl } — 결과 화면 공유 패널
+var RARITY_RANK = { mythic:6, legendary:5, epic:4, rare:3, uncommon:2, common:1 };
+function _plainText(s) { return String(s == null ? "" : s).replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim(); }
+function getRunHighlights() {
+    if (!player || !gameState) return null;
+    var clear = battlePhase === "ending";
+    var diff = getDifficulty();
+    var equips = [];
+    if (player.equipped && !Array.isArray(player.equipped)) {
+        for (var k in player.equipped) { var it = player.equipped[k]; if (it && it.name) equips.push(it); }
+    }
+    if (Array.isArray(player.inventory)) {
+        for (var i = 0; i < player.inventory.length; i++) {
+            var inv = player.inventory[i];
+            if (inv && inv.name && (inv.rarity === "legendary" || inv.rarity === "mythic") && equips.indexOf(inv) < 0) equips.push(inv);
+        }
+    }
+    equips.sort(function(a, b){ return (RARITY_RANK[b.rarity] || 0) - (RARITY_RANK[a.rarity] || 0); });
+    var grave = (!clear && _lastRunGrave) ? _lastRunGrave : null;
+    var hit = grave ? { enemyName:grave.killedByName, enemyIcon:grave.killedByIcon, skillName:grave.dotType || grave.skillName, damage:grave.lastDamage, isCrit:grave.isCrit }
+        : (gameState._deathHitInfo || null);
+    var journey = (Array.isArray(_journeyLog) ? _journeyLog : (grave && grave.journey) || []).slice(-12).map(function(e){
+        return (e && e.floor ? e.floor + "F " : "") + _plainText(e && e.text);
+    }).filter(function(t){ return t; });
+    return {
+        clear: clear,
+        className: _plainText(player.name), classIcon: player.icon || "", classKey: player.classKey, gender: player.gender || "female",
+        level: player.level || 1, floor: clear ? 10 : (gameState.floor || 1), cycle: gameState.cycle || 0,
+        kills: player.killCount || 0, rooms: gameState.totalTurns || 0, gold: player.gold || 0,
+        difficulty: _plainText(diff.name), difficultyIcon: diff.icon || "",
+        equips: equips.slice(0, 4).map(function(e){ return { name:_plainText(e.name), icon:e.icon || "", rarity:e.rarity || "common" }; }),
+        journey: journey,
+        killedBy: (!clear && hit && hit.enemyName) ? hit : null,
+        lastWords: clear ? "" : _plainText(gameState._deathQuote || (grave && grave.lastWords) || "")
+    };
+}
+function buildRunSummaryText() {
+    var h = getRunHighlights();
+    if (!h) return "";
+    var lines = ["[던전 모험 기록 — 리스라이크 던전 RPG]"];
+    if (h.clear) lines.push("결과: 🏆 던전 정복" + (h.cycle > 0 ? " (" + (h.cycle + 1) + "주차)" : ""));
+    else lines.push("결과: 💀 " + h.floor + "층에서 쓰러짐" + (h.killedBy ? " — " + _plainText(h.killedBy.enemyIcon) + " " + _plainText(h.killedBy.enemyName) + "의 " + (h.killedBy.isCrit ? "크리티컬 " : "") + _plainText(h.killedBy.skillName || "공격") + " (" + (h.killedBy.damage || 0) + " 피해)" : ""));
+    lines.push("모험가: " + h.classIcon + " " + h.className + " Lv." + h.level);
+    lines.push("난이도: " + h.difficultyIcon + " " + h.difficulty + " · 도달 " + h.floor + "층 · 처치 " + h.kills + "마리 · 탐험 " + h.rooms + "방 · 골드 " + h.gold + "G");
+    if (h.equips.length) lines.push("주요 장비: " + h.equips.map(function(e){ return e.icon + " " + e.name + " (" + (EQUIP_RARITIES[e.rarity] ? EQUIP_RARITIES[e.rarity].name : e.rarity) + ")"; }).join(", "));
+    if (h.journey.length) { lines.push("주요 사건:"); h.journey.forEach(function(j){ lines.push("- " + j); }); }
+    if (h.lastWords) lines.push("마지막 말: \"" + h.lastWords + "\"");
+    return lines.join("\n");
+}
+function buildJourneyContextBlock(text) {
+    return "\n<!--RPG_JOURNEY_START-->\n[Dungeon Run Record — shared once by the user]\n" + text + "\n" +
+        "Instructions: The user just finished this run of the dungeon RPG mini-game and wants to continue the story in chat. Treat the record as something that happened, react to it in character, and don't recite the numbers mechanically.\n<!--RPG_JOURNEY_END-->";
+}
+
+// 다음 일반 채팅 요청 1회에만 붙이고 바로 해제한다. 휴식 문맥과 같은 캐릭터 한정·마지막 user 앞 삽입 규칙.
+var _journeyCtxHandler = null;
+var _journeyCtxText = null;
+var _journeyCtxCharId = null;
+async function attachJourneyContext(text) {
+    if (!_hasRisu) throw new Error("RisuAI 안에서만 첨부할 수 있어요.");
+    if (!text) throw new Error("첨부할 모험 일지가 없어요.");
+    var c = await Risuai.getCharacter();
+    if (!c || !c.chaId) throw new Error("첨부할 채팅 캐릭터를 먼저 선택하세요.");
+    _journeyCtxText = text; _journeyCtxCharId = c.chaId;
+    if (_journeyCtxHandler) return;
+    _journeyCtxHandler = async function(messages, type) {
+        if (type !== "model" || !_journeyCtxText) return messages;
+        var selected = await Risuai.getCharacter();
+        if (!selected || selected.chaId !== _journeyCtxCharId) return messages;
+        var once = _journeyCtxText;
+        if (!once) return messages;
+        _journeyCtxText = null; // 1회 사용
+        Promise.resolve().then(clearJourneyContext).then(function(){ render(); }, function(e){ console.warn(PLUGIN_NAME, "일지 첨부 해제 실패:", e); });
+        return insertRestContext(messages, {role:"system", content:buildJourneyContextBlock(once)});
+    };
+    try { await Risuai.addRisuReplacer("beforeRequest", _journeyCtxHandler); }
+    catch(e) { _journeyCtxHandler = null; _journeyCtxText = null; _journeyCtxCharId = null; throw e; }
+}
+async function clearJourneyContext() {
+    _journeyCtxText = null; _journeyCtxCharId = null;
+    if (_hasRisu && _journeyCtxHandler) {
+        var handler = _journeyCtxHandler;
+        _journeyCtxHandler = null;
+        await Risuai.removeRisuReplacer("beforeRequest", handler);
+    }
+}
+function renderRunShareSection() {
+    var btn = 'class="rpg-btn" style="flex:1;padding:8px 4px;font-size:11px;';
+    var html = '<div class="rpg-section" style="text-align:left;margin-bottom:12px;">' +
+        '<div class="rpg-stat-label" style="margin-bottom:6px;">📜 이번 런 공유</div>' +
+        '<div style="display:flex;gap:4px;flex-wrap:wrap;">' +
+        '<button ' + btn + 'background:rgba(251,211,141,0.12);border:1px solid rgba(251,211,141,0.4);color:#fbd38d;" data-action="rpg_copyRunSummary">📋 일지 복사</button>' +
+        (_hasRisu ? (_journeyCtxText ?
+            '<button ' + btn + 'background:rgba(104,211,145,0.12);border:1px solid rgba(104,211,145,0.4);color:#68d391;" data-action="rpg_cancelJourneyContext">📎 첨부 대기 · 취소</button>' :
+            '<button ' + btn + 'background:rgba(154,128,255,0.12);border:1px solid rgba(154,128,255,0.4);color:#c4b5fd;" data-action="rpg_attachRunSummary">💬 다음 채팅에 첨부</button>') : '') +
+        '</div>';
+    if (_journeyCtxText) html += '<div style="font-size:10px;color:#68d391;margin-top:6px;">다음 채팅 요청 1회에 이 일지가 문맥으로 붙습니다. 카드에는 저장되지 않습니다.</div>';
+    if (_runShare && _runShare.mode === "text") {
+        html += '<textarea id="rpg-run-summary" readonly style="width:100%;height:140px;margin-top:6px;background:rgba(0,0,0,0.4);color:#fff;border:1px solid rgba(251,211,141,0.4);border-radius:6px;font-size:10px;padding:6px;resize:none;box-sizing:border-box;">' + escHtml(_runShare.text) + '</textarea>';
+    }
+    return html + '</div>';
+}
+window.rpg_copyRunSummary = async function(){
+    var text = buildRunSummaryText();
+    if (!text) return;
+    var ok = false;
+    try { if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(text); ok = true; } } catch(e) { ok = false; }
+    _runShare = { mode:"text", text:text };
+    render();
+    if (!ok) {
+        var ta = document.getElementById("rpg-run-summary");
+        try { if (ta) { ta.select(); ok = document.execCommand("copy"); } } catch(e2) { ok = false; }
+    }
+    showToast(ok ? "📋 모험 일지를 복사했어요!" : "아래 글을 길게 눌러 복사하세요.");
+};
+window.rpg_attachRunSummary = async function(){
+    try { await attachJourneyContext(buildRunSummaryText()); showToast("💬 다음 채팅 요청 1회에 모험 일지가 첨부됩니다."); }
+    catch(e) { showToast(e.message || "첨부 실패"); }
+    render();
+};
+window.rpg_cancelJourneyContext = async function(){
+    try { await clearJourneyContext(); } catch(e) { console.warn(PLUGIN_NAME, "일지 첨부 해제 실패:", e); }
+    showToast("📎 첨부를 취소했어요."); render();
+};
 
 // ═══════════════════════════════════════
 //  RPG ↔ Bot Bridge (pluginStorage 방식)

@@ -244,3 +244,30 @@ test('bot summon hidden in standalone mode',async t=>harness(t,setup+`
  await refreshBotCharacter(); assert.equal(_botChar,null); gameState.doorChoices=generateDoorChoices();
  assert.ok(!renderDoorChoices().includes('rpg_summonBot')); assert.equal(summonBotBoss(),false);
 `));
+test('run journal summary on defeat and one-shot chat attachment',async t=>harness(t,setup+`
+ let id='owner', handler, removed=0;
+ Risuai.getCharacter=async()=>({chaId:id}); Risuai.setCharacter=async()=>{throw new Error('must not edit card')};
+ Risuai.addRisuReplacer=async(type,fn)=>{assert.equal(type,'beforeRequest');handler=fn}; Risuai.removeRisuReplacer=async()=>{removed++};
+ _journeyLog=[{type:'floor',floor:2,text:'<b>🗺️ 2층</b> 도달'}]; gameState.floor=2; player.killCount=7;
+ _lastHitInfo={enemyName:'슬라임',enemyIcon:'🟢',skillName:'몸통 박치기',damage:12,isCrit:false,dotType:''};
+ playDefeatSound=function(){}; player.hp=0; handleDefeat(); await _saveQueue;
+ const text=buildRunSummaryText();
+ for (const s of ['2층에서 쓰러짐','슬라임','몸통 박치기','처치 7마리','2F 🗺️ 2층 도달',player.name]) assert.ok(text.includes(s),s);
+ assert.ok(!text.includes('<b>'));
+ assert.ok(renderGameOver().includes('rpg_attachRunSummary'));
+ await attachJourneyContext(text); assert.ok(renderRunShareSection().includes('rpg_cancelJourneyContext'));
+ const msgs=[{role:'system',content:'main'},{role:'user',content:'hi'},{role:'assistant',content:'prefill'}];
+ assert.equal((await handler(msgs,'submodel')).length,3);
+ id='other'; assert.equal((await handler(msgs,'model')).length,3); id='owner';
+ const out=await handler(msgs,'model');
+ assert.deepEqual(out.map(m=>m.role),['system','system','user','assistant']); assert.ok(out[1].content.includes('슬라임')); assert.equal(msgs.length,3);
+ assert.equal((await handler(msgs,'model')).length,3);
+ await new Promise(r=>window.setTimeout(r,5)); assert.equal(removed,1); assert.equal(_journeyCtxText,null);
+`,{risu:true}));
+test('run summary on clear screen and standalone share UI',async t=>harness(t,setup+`
+ battlePhase='ending'; gameState.running=false; gameState.floor=11;
+ player.equipped.weapon1={name:'전설검',icon:'⚔️',rarity:'legendary'};
+ const text=buildRunSummaryText(); assert.ok(text.includes('던전 정복')); assert.ok(text.includes('도달 10층')); assert.ok(text.includes('전설검 (전설)'));
+ const html=renderEnding(); assert.ok(html.includes('rpg_copyRunSummary')); assert.ok(!html.includes('rpg_attachRunSummary'));
+ await assert.rejects(attachJourneyContext(text));
+`));
