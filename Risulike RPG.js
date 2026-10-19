@@ -1017,7 +1017,8 @@ function helenaStartBattle() {
 // 헬레나 전투 중 랜덤 포션 지원 (20%)
 function helenaRandomSupport() {
     if (!_helenaJoined || !currentEnemy || currentEnemy.hp <= 0 || !player) return;
-    if (Math.random() > 0.30) return;
+    var _hRole = helenaRoleTuning();
+    if (Math.random() > _hRole.rate) return;
     var supportType = Math.random();
     var dialogues = [
         "그거 되게 바보같은 전략이네. 당장 하자!",
@@ -1029,14 +1030,14 @@ function helenaRandomSupport() {
     ];
     var msg = dialogues[Math.floor(Math.random() * dialogues.length)];
     var effectText = '';
-    if (supportType < 0.6) {
-        // 회복 (60%)
+    if (supportType < _hRole.t[0]) {
+        // 회복 (기본 60%)
         var heal = Math.max(1, Math.round(player.maxHp * 0.15));
         heal = applyHeal(heal);
         addLog("🧪 헬레나 포션! HP +" + heal, "heal");
         effectText = '🧪 HP +' + heal;
-    } else if (supportType < 0.85) {
-        // 공격 버프 (25%)
+    } else if (supportType < _hRole.t[1]) {
+        // 공격 버프 (기본 25%)
         playerBuff._inspire = Math.max(playerBuff._inspire || 0, 2);
         addLog("🧪 헬레나 강화약! 피해 +30% (2턴)", "buff");
         effectText = '⚔️ 피해 +30% (2턴)';
@@ -5925,7 +5926,7 @@ function processAllyAction() {
     if (ally.id === "lilith" && currentEnemy.key === "lilith_boss") return;
     // 전당 전투에서는 모든 동료 차단
     if (gameState._hallBattleActive) return;
-    if (Math.random() >= ally.triggerRate) return; // 확률 실패
+    if (Math.random() >= getAllyTriggerRate(ally)) return; // 확률 실패 (리리스는 역할 배수 적용)
     if (_allyPopupHtml) return; // 이미 팝업 표시 중
 
     var msg = ally.dialogue[Math.floor(Math.random() * ally.dialogue.length)];
@@ -5941,8 +5942,8 @@ function processAllyAction() {
             // 리리스 결혼 강화: 33% 딜 / 33% 보호막 / 33% 딜+보호막
             var _lilithMarried = (ally.id === "lilith" && gameState.quest && gameState.quest.flags && gameState.quest.flags.ending === "marry");
             if (_lilithMarried) {
-                var _lilRoll = Math.random();
-                if (_lilRoll < 0.33) {
+                var _lilRoll = Math.random(), _lilT = lilithRoleThresholds();
+                if (_lilRoll < _lilT[0]) {
                     // 딜만
                     dmg = Math.max(1, Math.round(currentEnemy.maxHp * (ally.power / 100)));
                     if (currentEnemy.shield && currentEnemy.shield > 0) { var _aAbs = Math.min(currentEnemy.shield, dmg); currentEnemy.shield -= _aAbs; dmg -= _aAbs; }
@@ -5950,7 +5951,7 @@ function processAllyAction() {
                     dmg = Math.max(1, Math.round(currentEnemy.maxHp * (ally.power / 100)));
                     _allyPopupHtml = '<div class="rpg-ally-popup" id="ally-popup-active">'+_popImg+'<div><div class="rpg-ally-popup-name">'+ally.icon+' '+ally.name+'의 지원공격!</div><div class="rpg-ally-popup-msg">"'+msg+'"</div><div class="rpg-ally-popup-effect">💥 적에게 '+dmg+' 피해!</div></div></div>';
                     addLog(ally.icon + " " + ally.name + ": \"" + msg + "\" → 적에게 " + dmg + " 피해!", "buff");
-                } else if (_lilRoll < 0.66) {
+                } else if (_lilRoll < _lilT[1]) {
                     // 보호막만
                     var _lilSh = Math.max(1, Math.round(player.maxHp * 0.10));
                     _lilSh = addShieldToPlayer(_lilSh);
@@ -5972,16 +5973,16 @@ function processAllyAction() {
             }
             // 기본 리리스 (미결혼): 딜5%/보호막5%/둘다5%
             if (ally.id === "lilith") {
-                var _lilRoll2 = Math.random();
+                var _lilRoll2 = Math.random(), _lilT2 = lilithRoleThresholds();
                 var _lilPow = 5; // 미결혼은 5%
-                if (_lilRoll2 < 0.33) {
+                if (_lilRoll2 < _lilT2[0]) {
                     dmg = Math.max(1, Math.round(currentEnemy.maxHp * (_lilPow / 100)));
                     if (currentEnemy.shield && currentEnemy.shield > 0) { var _aAbs3 = Math.min(currentEnemy.shield, dmg); currentEnemy.shield -= _aAbs3; dmg -= _aAbs3; }
                     if (dmg > 0) currentEnemy.hp = Math.max(0, currentEnemy.hp - dmg);
                     dmg = Math.max(1, Math.round(currentEnemy.maxHp * (_lilPow / 100)));
                     _allyPopupHtml = '<div class="rpg-ally-popup" id="ally-popup-active">'+_popImg+'<div><div class="rpg-ally-popup-name">'+ally.icon+' '+ally.name+'의 지원공격!</div><div class="rpg-ally-popup-msg">"'+msg+'"</div><div class="rpg-ally-popup-effect">💥 적에게 '+dmg+' 피해!</div></div></div>';
                     addLog(ally.icon + " " + ally.name + ": \"" + msg + "\" → 적에게 " + dmg + " 피해!", "buff");
-                } else if (_lilRoll2 < 0.66) {
+                } else if (_lilRoll2 < _lilT2[1]) {
                     var _lilSh3 = Math.max(1, Math.round(player.maxHp * 0.05));
                     _lilSh3 = addShieldToPlayer(_lilSh3);
                     _allyPopupHtml = '<div class="rpg-ally-popup" id="ally-popup-active">'+_popImg+'<div><div class="rpg-ally-popup-name">'+ally.icon+' '+ally.name+'의 수호!</div><div class="rpg-ally-popup-msg">"'+msg+'"</div><div class="rpg-ally-popup-effect">🔰 보호막 +'+_lilSh3+'!</div></div></div>';
@@ -6098,6 +6099,13 @@ function determineEvent(doorType) {
     if (hasPassive("treasureHunt")) {
         adjusted = adjusted.map(function(w) {
             return { type:w.type, weight: w.type === "chest" ? w.weight * 2.5 : w.weight };
+        });
+    }
+    // 동료 역할: 탐색이면 상자 방 가중치 증가
+    var _scoutMul = scoutChestMultiplier();
+    if (_scoutMul !== 1) {
+        adjusted = adjusted.map(function(w) {
+            return { type:w.type, weight: w.type === "chest" ? w.weight * _scoutMul : w.weight };
         });
     }
     return weightedPick(adjusted);
@@ -13414,6 +13422,7 @@ function renderDoorChoices() {
                     dt.icon+' '+dt.name+'</button>';
             }).join("")+'</div>' :
             '<div class="'+gridClass+'">'+cards+'</div>')+
+        renderAllyRolePanel()+
         renderBotSummonPanel()+
         '<button class="rpg-btn full" style="margin-top:8px;background:linear-gradient(135deg,#2d3748,#4a5568);border:1px solid rgba(183,148,244,0.3);color:#c9a0ff;font-size:11px;padding:8px;" data-action="rpg_rest">🔥 휴식하기</button>'+
         (function(){ var _sfxD=getStarEffects(); if(_sfxD.doorReroll>0&&!gameState._doorRerollUsed) return '<button class="rpg-btn full" style="margin-top:4px;background:rgba(255,215,0,0.08);border:1px solid rgba(255,215,0,0.25);color:#ffd700;font-size:10px;padding:6px;" data-action="rpg_doorReroll">🔄 방 재생성 (⭐ 런당 '+_sfxD.doorReroll+'회)</button>'; return ''; })() +
@@ -17031,6 +17040,75 @@ window.rpg_downloadRunCard = function(){
     } catch(e) { showToast("다운로드가 막혔어요. 이미지를 길게 눌러 저장하세요."); }
 };
 window.rpg_closeRunShare = function(){ _runShare = null; render(); };
+
+// ═══ 동료 역할 (리리스·헬레나): 기존 발동 확률·효과 가중치만 조정, 대사·합류 조건은 그대로 ═══
+var ALLY_ROLE_DEFS = {
+    balanced: { name:"기본", icon:"⚖️", desc:"기존 행동 그대로" },
+    attack:   { name:"공격", icon:"⚔️", desc:"지원 확률↑ · 공격 효과 위주" },
+    guard:    { name:"보호", icon:"🛡️", desc:"보호막·회복 효과 위주" },
+    scout:    { name:"탐색", icon:"🔍", desc:"전투 지원↓ · 상자 방 출현↑" }
+};
+// 리리스: 발동 확률 배수, [딜만 상한, 보호막만 상한] (나머지는 딜+보호막)
+var LILITH_ROLE_TUNING = {
+    balanced: { rate:1.00, t:[0.33, 0.66] },
+    attack:   { rate:1.25, t:[0.55, 0.65] },
+    guard:    { rate:1.00, t:[0.10, 0.65] },
+    scout:    { rate:0.80, t:[0.33, 0.66] }
+};
+// 헬레나: 지원 확률, [회복 상한, 공격약 상한] (나머지는 방어약)
+var HELENA_ROLE_TUNING = {
+    balanced: { rate:0.30, t:[0.60, 0.85] },
+    attack:   { rate:0.36, t:[0.30, 0.85] },
+    guard:    { rate:0.30, t:[0.45, 0.55] },
+    scout:    { rate:0.24, t:[0.60, 0.85] }
+};
+var SCOUT_CHEST_MUL = 1.25;
+function getAllyRole(who) {
+    var r = gameState && gameState.allyRoles && gameState.allyRoles[who];
+    return Object.hasOwn(ALLY_ROLE_DEFS, r || "") ? r : "balanced";
+}
+function isLilithAlly(ally) { return !!(ally && (ally.id === "lilith" || ally.id === "lilith_temp")); }
+function getAllyTriggerRate(ally) {
+    if (!isLilithAlly(ally)) return ally.triggerRate;
+    return Math.min(0.5, ally.triggerRate * LILITH_ROLE_TUNING[getAllyRole("lilith")].rate);
+}
+function lilithRoleThresholds() { return LILITH_ROLE_TUNING[getAllyRole("lilith")].t; }
+function helenaRoleTuning() { return HELENA_ROLE_TUNING[getAllyRole("helena")]; }
+function scoutChestMultiplier() {
+    var mul = 1;
+    if (gameState && isLilithAlly(gameState.ally) && getAllyRole("lilith") === "scout") mul *= SCOUT_CHEST_MUL;
+    if (_helenaJoined && getAllyRole("helena") === "scout") mul *= SCOUT_CHEST_MUL;
+    return mul;
+}
+function setAllyRole(who, role) {
+    if (!gameState || (who !== "lilith" && who !== "helena") || !Object.hasOwn(ALLY_ROLE_DEFS, role)) return false;
+    if (!gameState.allyRoles || typeof gameState.allyRoles !== "object") gameState.allyRoles = {};
+    gameState.allyRoles[who] = role;
+    var d = ALLY_ROLE_DEFS[role];
+    addLog((who === "lilith" ? "🦇 리리스" : "😈 헬레나") + " 역할: " + d.icon + " " + d.name + " — " + d.desc, "info");
+    saveAll(); render();
+    return true;
+}
+function renderAllyRolePanel() {
+    if (!gameState) return "";
+    var rows = [];
+    if (isLilithAlly(gameState.ally)) rows.push({ who:"lilith", label:"🦇 리리스" });
+    if (_helenaJoined) rows.push({ who:"helena", label:"😈 헬레나" });
+    if (!rows.length) return "";
+    var html = '<div style="margin-top:8px;padding:8px;border:1px solid rgba(255,182,193,0.25);border-radius:8px;background:rgba(255,182,193,0.04);">' +
+        '<div style="font-size:11px;color:#ffb7c5;font-weight:bold;margin-bottom:4px;">🤝 동료 역할</div>';
+    rows.forEach(function(r) {
+        var cur = getAllyRole(r.who);
+        html += '<div style="display:flex;align-items:center;gap:4px;margin:3px 0;"><span style="font-size:10px;width:58px;color:rgba(255,255,255,0.7);">' + r.label + '</span>';
+        Object.keys(ALLY_ROLE_DEFS).forEach(function(k) {
+            var d = ALLY_ROLE_DEFS[k], on = k === cur;
+            html += '<button class="rpg-btn" title="' + d.desc + '" style="flex:1;padding:4px 2px;font-size:9px;background:' + (on ? 'rgba(255,182,193,0.25)' : 'rgba(255,255,255,0.04)') + ';border:1px solid ' + (on ? 'rgba(255,182,193,0.6)' : 'rgba(255,255,255,0.15)') + ';color:' + (on ? '#ffb7c5' : 'rgba(255,255,255,0.6)') + ';" data-action="rpg_setAllyRole" data-args="\'' + r.who + '\',\'' + k + '\'">' + d.icon + ' ' + d.name + '</button>';
+        });
+        html += '</div>';
+    });
+    return html + '<div style="font-size:9px;color:rgba(255,255,255,0.4);margin-top:2px;">' + ALLY_ROLE_DEFS[getAllyRole(rows[0].who)].desc + '</div></div>';
+}
+window.rpg_setAllyRole = function(who, role){ setAllyRole(who, role); };
 
 // ═══════════════════════════════════════
 //  RPG ↔ Bot Bridge (pluginStorage 방식)

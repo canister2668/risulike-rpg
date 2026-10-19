@@ -286,3 +286,31 @@ test('run result card draws key stats and exports PNG without network',async t=>
  let clicked=0; HTMLAnchorElement.prototype.click=function(){clicked++; assert.ok(this.download.endsWith('.png'))};
  rpg_downloadRunCard(); assert.equal(clicked,1);
 `));
+test('companion roles tune only Lilith/Helena trigger rates and effect weights',async t=>harness(t,setup+`
+ window.setTimeout=function(){return 1}; showAllyPopupOverlay=function(){}; queuePopup=function(){};
+ assert.equal(getAllyRole('lilith'),'balanced'); assert.equal(getAllyRole('helena'),'balanced');
+ const lilith=()=>({id:'lilith',name:'리리스',icon:'🦇',triggerRate:0.20,effect:'damage',power:8,dialogue:['같이 싸우자!']});
+ function act(role,roll){
+  gameState.allyRoles=role?{lilith:role}:undefined; gameState.ally=lilith(); _allyPopupHtml='';
+  currentEnemy=spawnEnemy('slime',1); currentEnemy.hp=currentEnemy.maxHp=1000; currentEnemy.shield=0; player.shield=0;
+  Math.random=()=>roll; processAllyAction(); return {dmg:1000-currentEnemy.hp, shield:player.shield};
+ }
+ assert.equal(act(null,0.22).dmg+act(null,0.22).shield,0);              // 기본 20%: 발동 안 함
+ let r=act('attack',0.22); assert.ok(r.dmg>0 && r.shield===0);           // 공격 25%: 발동, 0.22<0.55 딜만
+ r=act(null,0.5); assert.ok(r.dmg===0 && r.shield===0);                  // 기본은 0.5에서 미발동
+ r=act('guard',0.05); assert.ok(r.dmg>0);                                // 보호: 0.05<0.10 딜
+ r=act('guard',0.15); assert.ok(r.dmg===0 && r.shield>0);                // 보호: 0.15 → 보호막
+ r=act('balanced',0.15); assert.ok(r.dmg>0 && r.shield===0);             // 기본: 0.15<0.33 딜 (기존과 동일)
+ assert.equal(gameState.ally.dialogue[0],'같이 싸우자!');
+ _helenaJoined=true; currentEnemy=spawnEnemy('slime',1); playerBuff._inspire=0;
+ gameState.allyRoles={helena:'balanced'}; Math.random=()=>0.33; helenaRandomSupport(); assert.equal(playerBuff._inspire||0,0);
+ gameState.allyRoles={helena:'attack'}; helenaRandomSupport(); assert.equal(playerBuff._inspire,2);
+ gameState.allyRoles={helena:'scout'}; assert.equal(scoutChestMultiplier(),1.25);
+ gameState.ally=lilith(); gameState.allyRoles={helena:'scout',lilith:'scout'}; assert.equal(scoutChestMultiplier(),1.5625);
+ const door='door'; let captured; weightedPick=w=>{captured=w;return 'monster'};
+ gameState._assignedQuest=null; determineEvent(door); const chest=captured.find(w=>w.type==='chest').weight;
+ gameState.allyRoles={}; determineEvent(door); assert.ok(Math.abs(chest-captured.find(w=>w.type==='chest').weight*1.5625)<1e-9);
+ gameState.doorChoices=generateDoorChoices();
+ assert.ok(renderAllyRolePanel().includes("rpg_setAllyRole")); assert.equal(setAllyRole('helena','bogus'),false);
+ assert.equal(setAllyRole('lilith','guard'),true); assert.equal(JSON.parse(JSON.stringify(gameState)).allyRoles.lilith,'guard');
+`));
