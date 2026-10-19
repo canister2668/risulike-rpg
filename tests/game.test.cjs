@@ -223,3 +223,24 @@ test('v1 import restore point covers continue save; preview refuses bad code and
  assert.equal(await undoImport(),true); assert.equal(store.get(KEY_PLAYER),mainBefore);
  assert.equal(JSON.parse(JSON.parse(store.get(slotKey(1))).player).classKey,'warrior');
 `,{risu:true}));
+test('bot character summon reuses ally/boss templates and never edits the card',async t=>harness(t,setup+`
+ let cha={chaId:'c1',name:'Aria<img onerror=x>',image:'data:image/png;base64,iVBORw0KGgo='};
+ Risuai.getCharacter=async()=>cha; Risuai.setCharacter=async()=>{throw new Error('must not edit card')};
+ await refreshBotCharacter(); assert.equal(_botChar.name,'Ariaimg onerror=x'); assert.ok(_botChar.image.startsWith('data:image/png'));
+ gameState.doorChoices=generateDoorChoices(); gameState.ally=null;
+ assert.ok(renderDoorChoices().includes('rpg_summonBotAlly'));
+ assert.equal(summonBotAlly(),true); assert.equal(gameState.ally.id,'bot_guest'); assert.equal(gameState.ally.power,8); assert.equal(gameState.ally.triggerRate,0.25);
+ assert.equal(summonBotAlly(),false); assert.ok(!renderDoorChoices().includes('rpg_summonBotAlly'));
+ const ref=spawnEnemy(getFloorPool(1).boss,1);
+ assert.equal(summonBotBoss(),true); assert.equal(currentEnemy.name,_botChar.name); assert.equal(currentEnemy.maxHp,ref.maxHp);
+ assert.equal(currentEnemy.boss,false); assert.equal(gameState.phase,'battle'); assert.equal(summonBotBoss(),false);
+ assert.ok(getEnemyPortraitHTML(currentEnemy.key,40).includes('data:image/png'));
+ const saved=JSON.parse(JSON.stringify(gameState)); assert.equal(JSON.stringify(saved).includes('iVBORw0KGgo'),false);
+ cha={chaId:'c2',name:'Bob',image:'javascript:alert(1)'}; await refreshBotCharacter(); assert.equal(_botChar.image,null);
+ cha=null; await refreshBotCharacter(); assert.equal(_botChar,null);
+ currentEnemy=null; gameState.phase='chooseDoor'; assert.equal(renderBotSummonPanel(),'');
+`,{risu:true}));
+test('bot summon hidden in standalone mode',async t=>harness(t,setup+`
+ await refreshBotCharacter(); assert.equal(_botChar,null); gameState.doorChoices=generateDoorChoices();
+ assert.ok(!renderDoorChoices().includes('rpg_summonBot')); assert.equal(summonBotBoss(),false);
+`));

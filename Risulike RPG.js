@@ -2032,6 +2032,11 @@ var SKILL_PORTRAITS = {
 function getEnemyPortraitHTML(enemyKey, size, extraClass) {
     size = size || 48;
     extraClass = extraClass || "";
+    // 봇 캐릭터 특별 보스: 안전한 data:/https 이미지가 있을 때만 교체, 없으면 원래 보스 초상화
+    if (currentEnemy && currentEnemy._botSummon && currentEnemy.key === enemyKey && typeof botImageFor === "function") {
+        var _botSrc = botImageFor(currentEnemy._botChaId);
+        if (_botSrc) return '<img class="rpg-portrait rpg-portrait-enemy ' + extraClass + '" src="' + _botSrc + '" width="' + size + '" height="' + size + '" style="object-fit:cover;border-radius:' + (size>48?'12px':'8px') + ';border:2px solid rgba(144,205,244,0.6);" />';
+    }
     // 거울방 적: 플레이어 클래스 포트레이트 사용
     if (enemyKey && enemyKey.indexOf("mirror_") === 0) {
         var _mck = enemyKey.replace("mirror_", "");
@@ -4620,6 +4625,7 @@ async function loadFromSlot(n) {
         }
         _activeSlot = n;
         await restoreRestContext();
+        await refreshBotCharacter();
         await saveAll(); // 메인 세이브에도 반영
         showToast("📂 슬롯 " + n + " 불러오기!");
         // 모든 오버레이 닫기
@@ -5927,6 +5933,7 @@ function processAllyAction() {
 
     // 포트레이트 팝업 생성
     var _popPortrait = (ally.id === "lilith" && typeof LILITH_PORTRAITS !== "undefined") ? LILITH_PORTRAITS.lilith_battle : null;
+    if (!_popPortrait && ally.id === "bot_guest") _popPortrait = botImageFor(ally._botChaId);
     var _popImg = _popPortrait ? '<img src="'+_popPortrait+'" width="56" height="56" style="border-radius:8px;image-rendering:pixelated;" />' : '<div style="font-size:28px;">'+ally.icon+'</div>';
 
     switch(ally.effect) {
@@ -11254,7 +11261,7 @@ function _doVictory() {
         battlePhase = "playerTurn"; render(); return;
     }
     // 도감: 몬스터 등록
-    if (currentEnemy && currentEnemy.key) {
+    if (currentEnemy && currentEnemy.key && !currentEnemy._botSummon) {
         var isNew = registerCodex("monsters", currentEnemy.key);
         if (isNew) addLog("📖 도감 등록! " + currentEnemy.icon + " " + currentEnemy.name, "level");
     }
@@ -11276,7 +11283,7 @@ function _doVictory() {
         darkKnight: "좋은... 검이었다...", demonPrince: "... 드디어 쉴 수 있는 건가.",
         dragonLord: "인간이... 용을...", darkLord: "이것이... 끝인가...",
     };
-    if (currentEnemy) gameState._lastDeathLine = _deathLines[currentEnemy.key] || null;
+    if (currentEnemy) gameState._lastDeathLine = currentEnemy._botSummon ? null : (_deathLines[currentEnemy.key] || null);
     // 여정 기록: 보스 처치
     if (currentEnemy && currentEnemy.boss) {
         _journeyLog.push({type:"boss", floor:gameState?gameState.floor:0, text:"👑 "+currentEnemy.icon+" "+currentEnemy.name+"을(를) ["+_lastPlayerSkill+"]"+ (_lastCritFlag?" 💥크리티컬":"") +"(으)로 처치!"});
@@ -11692,6 +11699,7 @@ function renderGraveyard() {
 function startNewGame() {
     _playerMutations = [];
     _journeyLog = [];
+    refreshBotCharacter();
     selectingDifficulty=true; selectingClass=false; player=null; gameState=null; currentEnemy=null; battlePhase="";
     _pendingClassKey = null;
     // 모든 오버레이/팝업 닫기
@@ -13404,6 +13412,7 @@ function renderDoorChoices() {
                     dt.icon+' '+dt.name+'</button>';
             }).join("")+'</div>' :
             '<div class="'+gridClass+'">'+cards+'</div>')+
+        renderBotSummonPanel()+
         '<button class="rpg-btn full" style="margin-top:8px;background:linear-gradient(135deg,#2d3748,#4a5568);border:1px solid rgba(183,148,244,0.3);color:#c9a0ff;font-size:11px;padding:8px;" data-action="rpg_rest">🔥 휴식하기</button>'+
         (function(){ var _sfxD=getStarEffects(); if(_sfxD.doorReroll>0&&!gameState._doorRerollUsed) return '<button class="rpg-btn full" style="margin-top:4px;background:rgba(255,215,0,0.08);border:1px solid rgba(255,215,0,0.25);color:#ffd700;font-size:10px;padding:6px;" data-action="rpg_doorReroll">🔄 방 재생성 (⭐ 런당 '+_sfxD.doorReroll+'회)</button>'; return ''; })() +
         '</div>';
@@ -15751,6 +15760,7 @@ window.rpg_continue    = async function(){
     _achievementOpen = false; _statsOpen = false;
     _transferMode = null; _transferCode = null;
     if(await loadGame()){
+        await refreshBotCharacter();
         if(gameState.difficulty) gameDifficulty = gameState.difficulty;
         if(gameState.phase==="battle") {
             gameState.phase = "chooseDoor";
@@ -16640,6 +16650,7 @@ async function initRPG() {
                 }
                 if (isWindowVisible) {
                     await showRpgContainer();
+                    refreshBotCharacter().then(function(){ render(); });
                 } else {
                     await Risuai.hideContainer();
                 }
@@ -16658,6 +16669,7 @@ async function initRPG() {
     await loadCodex();
     await loadStarShop();
     await syncDifficultyClearProgress();
+    await refreshBotCharacter();
 
     // 세이브 데이터 로드 (존재 확인만, 메인화면부터 시작)
     try {
@@ -16692,6 +16704,101 @@ async function initRPG() {
 
     console.log(PLUGIN_NAME+" 준비 완료!");
 }
+
+// ═══════════════════════════════════════
+//  봇 캐릭터 소환 (getCharacter 읽기 전용 — 카드에는 절대 쓰지 않음)
+// ═══════════════════════════════════════
+var _botChar = null; // { chaId, name, image|null } — 메모리 전용, 이미지는 세이브에 넣지 않는다
+function _safeBotImage(src) {
+    if (typeof src !== "string" || src.length > 3000000) return null;
+    if (/^data:image\/(png|jpeg|jpg|gif|webp);base64,[A-Za-z0-9+/=]+$/.test(src)) return src;
+    if (/^https:\/\/[^\s"'<>()\\]+$/.test(src)) return src;
+    return null;
+}
+function _cleanBotName(name) {
+    if (typeof name !== "string") return "";
+    // 이름은 로그·HTML·canvas 여러 곳에 그대로 들어가므로 마크업 문자를 제거한다.
+    return name.replace(/[<>&"'`\\\u0000-\u001f\u007f]/g, "").replace(/\s+/g, " ").trim().slice(0, 24);
+}
+async function refreshBotCharacter() {
+    var next = null;
+    if (_hasRisu) {
+        try {
+            var c = await Risuai.getCharacter();
+            var name = c ? _cleanBotName(c.name) : "";
+            if (name) next = { chaId: c.chaId || null, name: name, image: _safeBotImage(c.image) };
+        } catch(e) { next = null; }
+    }
+    _botChar = next;
+    return _botChar;
+}
+function botImageFor(chaId) {
+    return (_botChar && _botChar.image && _botChar.chaId === chaId) ? _botChar.image : null;
+}
+function _botSummonState() {
+    if (!gameState._botSummon || typeof gameState._botSummon !== "object") gameState._botSummon = { ally:false, boss:false };
+    return gameState._botSummon;
+}
+function _canBotSummon() {
+    return !!(_botChar && player && gameState && gameState.running && gameState.phase === "chooseDoor" && !gameState._resting && !(currentEnemy && currentEnemy.hp > 0));
+}
+// 동료: 기존 리리스 임시 동료(lilith_temp)와 같은 수치 틀을 재사용한다.
+function summonBotAlly() {
+    if (!_canBotSummon()) return false;
+    var st = _botSummonState();
+    if (st.ally) return false;
+    if (gameState.ally) { showToast("이미 함께하는 동료가 있어요."); return false; }
+    gameState.ally = { id:"bot_guest", name:_botChar.name, icon:"🤝", triggerRate:0.25, effect:"damage", power:8,
+        dialogue:["가만 안 둬!","내가 도와줄게!","같이 싸우자!"], _botChaId:_botChar.chaId };
+    st.ally = true;
+    addLog("🤝 " + _botChar.name + "이(가) 던전에 나타나 동료가 되었다! (25% 확률 지원)", "level");
+    _journeyLog.push({ type:"event", floor:gameState.floor, text:"🤝 " + _botChar.name + "이(가) 동료로 합류" });
+    saveAll(); render();
+    return true;
+}
+// 특별 보스: 현재 층 보스 템플릿의 능력치를 그대로 쓰고 이름·아이콘만 입힌다. 층 진행에는 영향 없음(엘리트 판정).
+function summonBotBoss() {
+    if (!_canBotSummon()) return false;
+    var st = _botSummonState();
+    if (st.boss) return false;
+    var pool = getFloorPool(gameState.floor);
+    currentEnemy = spawnEnemy(pool.boss, gameState.floor);
+    currentEnemy.name = _botChar.name;
+    currentEnemy.icon = "🌟";
+    currentEnemy.boss = false; currentEnemy.elite = true; currentEnemy._canRevive = false;
+    currentEnemy._botSummon = true; currentEnemy._botChaId = _botChar.chaId;
+    st.boss = true;
+    _playerPoison.turns = 0;
+    battlePhase = "playerTurn";
+    _achievementStats.critsInBattle = 0;
+    _battleStats = null; _ensureBattleStats();
+    checkSynergies();
+    gameState.phase = "battle";
+    addLog("🌟 특별 보스! " + _botChar.name + "이(가) 도전장을 내밀었다!", "enemy");
+    logEnemyShield();
+    logEnemySkills();
+    playDangerSound();
+    helenaStartBattle();
+    saveAll(); render();
+    return true;
+}
+function renderBotSummonPanel() {
+    if (!_canBotSummon()) return "";
+    var st = gameState._botSummon || {};
+    if (st.ally && st.boss) return "";
+    var img = _botChar.image ? '<img src="' + _botChar.image + '" width="28" height="28" style="border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:6px;border:1px solid rgba(144,205,244,0.5);" />' : '🤖 ';
+    var html = '<div style="margin-top:8px;padding:8px;border:1px solid rgba(144,205,244,0.3);border-radius:8px;background:rgba(144,205,244,0.05);">' +
+        '<div style="font-size:11px;color:#90cdf4;font-weight:bold;margin-bottom:6px;">' + img + _botChar.name + ' 소환 <span style="font-weight:normal;color:rgba(255,255,255,0.4);">(런당 각 1회)</span></div><div style="display:flex;gap:4px;">';
+    if (!st.ally) {
+        html += gameState.ally ?
+            '<div style="flex:1;font-size:10px;color:rgba(255,255,255,0.4);text-align:center;padding:6px;">🤝 동료 자리가 차 있음</div>' :
+            '<button class="rpg-btn" style="flex:1;padding:6px;font-size:10px;background:rgba(104,211,145,0.12);border:1px solid rgba(104,211,145,0.4);color:#68d391;" data-action="rpg_summonBotAlly">🤝 동료로 부르기</button>';
+    }
+    if (!st.boss) html += '<button class="rpg-btn" style="flex:1;padding:6px;font-size:10px;background:rgba(252,129,129,0.12);border:1px solid rgba(252,129,129,0.4);color:#fc8181;" data-action="rpg_summonBotBoss">⚔️ 특별 보스 도전</button>';
+    return html + '</div></div>';
+}
+window.rpg_summonBotAlly = async function(){ await refreshBotCharacter(); if (!_botChar) { showToast("현재 채팅 캐릭터를 찾을 수 없어요."); render(); return; } summonBotAlly(); };
+window.rpg_summonBotBoss = async function(){ await refreshBotCharacter(); if (!_botChar) { showToast("현재 채팅 캐릭터를 찾을 수 없어요."); render(); return; } summonBotBoss(); };
 
 // ═══════════════════════════════════════
 //  RPG ↔ Bot Bridge (pluginStorage 방식)
