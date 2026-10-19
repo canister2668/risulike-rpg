@@ -1,17 +1,17 @@
 {
-  "release": "0.2",
+  "release": "0.3",
   "sourceVersion": "9.1.4",
   "sourceSha256": "bfeda5ac9bdabe48b932a2e9c87b7ee638083bc850a77887cc9253b267ab04a8",
   "file": "Risulike RPG.js",
-  "sha256": "061c59a9a8eded853a2ba422c717d6c90dabf99db13fa9653911530d30a48956",
+  "sha256": "468d4c8b4e668a8c8185f534ba5377083e59230992b87266665e29e5148f4b36",
   "embeddedImages": 445,
   "invalidImages": [],
   "officialSourceRevision": "454e5e207747399f43a4788f5f08ecd5aa291550",
-  "tests": 34,
-  "passed": 34,
+  "tests": 38,
+  "passed": 38,
   "baselinePassed": 8,
   "baselineFailed": 13,
-  "browserStatus": "executed: Chromium 141.0.7390.37 headless via CHROMIUM_PATH=/opt/pw-browsers/chromium, Playwright 1.64.1; desktop/mobile smoke + v0.2 feature screens passed with API mock; not a stock-host test; run on the feature branch before the 0.2 version-string bump",
+  "browserStatus": "v0.2 feature branch: Chromium 141 headless smoke passed with API mock (cloud session). Not re-run for v0.3: Chromium cannot start on the NAS (libpixman missing).",
   "stockHostIntegration": "not executed",
   "liveChanges": false,
   "removedBrokenImage": "PASSIVE_PORTRAITS.trueSight; truncated WebP; existing fallback used",
@@ -27,5 +27,23 @@
     "RISUlike RPG::importRestorePoint",
     "RISUlike RPG::uiSettings (safeLocalStorage)"
   ],
-  "testsNote": "25 v0.1 tests unchanged + 9 feature tests; baselinePassed/baselineFailed apply to the 21 tests present at the v0.1 tag"
+  "testsNote": "25 v0.1 tests unchanged + 9 feature tests; baselinePassed/baselineFailed apply to the 21 tests present at the v0.1 tag",
+  "softlockSweep": {
+    "scope": "difficulty 2-3 x 16 classes x 60 runs, seed 1",
+    "before": {
+      "runs": 1920,
+      "softlocks": 30
+    },
+    "after": {
+      "runs": 1920,
+      "softlocks": 0,
+      "errors": 0,
+      "stuck": 0
+    },
+    "clearRate": {
+      "before": "61.6%",
+      "after": "61.7%"
+    }
+  },
+  "updateUrl": "https://raw.githubusercontent.com/canister2668/risulike-rpg/main/Risulike%20RPG.js"
 }

@@ -1,7 +1,8 @@
 //@name Risulike RPG
-//@display-name ⚔️ 리스라이크 던전 RPG (DnD Edition) v0.2
+//@display-name ⚔️ 리스라이크 던전 RPG (DnD Edition) v0.3
 //@api 3.0
-//@version 0.2
+//@version 0.3
+//@update-url https://raw.githubusercontent.com/canister2668/risulike-rpg/main/Risulike%20RPG.js
 //@arg rpg_player string "" "플레이어 세이브 데이터"
 //@arg rpg_gameState string "" "게임 상태 세이브 데이터"
 
@@ -11,6 +12,9 @@ try {
 // ─── 플러그인 상수 ───
 //#region 📌 플러그인 상수
 const PLUGIN_NAME  = "[Risulike RPG]";
+// 헤더의 //@version 과 같게 유지한다 (테스트가 확인).
+const RPG_VERSION  = "0.3";
+const RPG_UPDATE_URL = "https://raw.githubusercontent.com/canister2668/risulike-rpg/main/Risulike%20RPG.js";
 const RPG_UI_ID    = "risu-rpg-container";
 const RPG_STYLE_ID = "risu-rpg-style";
 // ※ API 3.0: @arg로 선언한 서버 저장 키
@@ -7187,6 +7191,14 @@ var _isFreeTurnAttack = false;
 
     /** 플레이어에게 피해 적용 (보호막 우선 차감 + 패시브 피해 감소) */
 function applyDamageToPlayer(dmg) {
+    var result = _applyDamageToPlayerInner(dmg);
+    // 반사/반격으로 적 HP 0 도달 시 승리 처리. 잔상 반격·가시 생존·헬레나 구출처럼 중간에 반환하는 경로도 포함한다.
+    if (currentEnemy && currentEnemy.hp <= 0 && player && player.hp > 0) {
+        setTimeout(function(){ if(currentEnemy && currentEnemy.hp <= 0) handleVictory(); }, 100);
+    }
+    return result;
+}
+function _applyDamageToPlayerInner(dmg) {
     var universalSet = calcUniversalSetBonus();
     if (!_mirageStepInited && hasPassive("mirageStep")) { _mirageStepCount = 2; _mirageStepInited = true; }
     // afterimage: 30% 회피 + 즉시 반격
@@ -7497,10 +7509,6 @@ function applyDamageToPlayer(dmg) {
     // HP 0 이하인데 보호막만 남은 좀비 상태 방지
     if (player.hp <= 0 && player.shield > 0) {
         player.shield = 0;
-    }
-    // 반사/반격으로 적 HP 0 도달 시 승리 처리
-    if (currentEnemy && currentEnemy.hp <= 0 && player.hp > 0) {
-        setTimeout(function(){ if(currentEnemy && currentEnemy.hp <= 0) handleVictory(); }, 100);
     }
     return dmg;
 }
@@ -12970,7 +12978,7 @@ function render() {
     if(_headerEl){
         var _hft2=(gameState&&gameState.floor&&gameState.running!==false)?getFloorTheme(gameState.floor):null;
                 var _aImg=(ENEMY_PORTRAITS&&ENEMY_PORTRAITS.airisu)?"<img src=\""+ENEMY_PORTRAITS.airisu+"\" width=\"20\" height=\"20\" style=\"border-radius:50%;vertical-align:middle;margin-right:4px;border:1px solid rgba(135,206,250,0.5);\">":" ";
-        _headerEl.innerHTML=_aImg+' v0.2'+(_hft2?' <span style="font-size:10px;color:'+_hft2.color+';">'+_hft2.icon+' '+gameState.floor+'F</span>':'');
+        _headerEl.innerHTML=_aImg+' v'+RPG_VERSION+(_hft2?' <span style="font-size:10px;color:'+_hft2.color+';">'+_hft2.icon+' '+gameState.floor+'F</span>':'');
     }
     if(selectingDifficulty){
         body.innerHTML=renderDifficultySelect();
@@ -15381,6 +15389,7 @@ function renderMainMenu() {
         '<div style="text-align:center;margin-bottom:12px;animation:rpg-float 2.5s ease-in-out infinite;">'+(ENEMY_PORTRAITS&&ENEMY_PORTRAITS.airisu?'<img src="'+ENEMY_PORTRAITS.airisu+'" width="96" height="96" style="border-radius:50%;border:3px solid rgba(135,206,250,0.5);box-shadow:0 0 20px rgba(135,206,250,0.3);">':'⚔️')+'</div>'+
         '<div style="font-size:20px;font-weight:bold;color:#ffd700;margin-bottom:4px;">리스라이크 던전 RPG</div>'+
         slotHint+
+        renderUpdateBanner()+
         '<div class="rpg-btn-grid" style="max-width:280px;margin:0 auto;">'+
         '<button class="rpg-btn new-game full" id="rpg-menu-newgame">🎮 새 게임</button>'+
         (hasSave?'<button class="rpg-btn defend full" id="rpg-menu-continue">📂 이어하기</button>':"")+
@@ -15401,6 +15410,7 @@ function renderMainMenu() {
         '<label style="flex:1;display:flex;align-items:center;gap:4px;font-size:9px;color:rgba(255,255,255,0.6);">'+(_sfxVolume>0?'🔊':'🔇')+
         '<input type="range" id="rpg-menu-volume" min="0" max="100" step="5" value="'+_sfxVolume+'" aria-label="효과음 음량" style="flex:1;min-width:0;" />'+
         '<span id="rpg-menu-volume-val" style="width:24px;text-align:right;">'+_sfxVolume+'</span></label>'+
+        (_hasRisu ? '<button class="rpg-btn" style="flex:0 0 auto;padding:5px 8px;font-size:9px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.2);color:#e2e8f0;" data-action="rpg_checkUpdate" title="새 버전 확인">🔄 v'+RPG_VERSION+'</button>' : '')+
         '</div>';
 }
 
@@ -15541,7 +15551,7 @@ function createUI() {
     if(!document.getElementById(RPG_UI_ID)){
         var win=document.createElement("div");win.id=RPG_UI_ID;
         win.innerHTML='<div class="rpg-header" id="rpg-drag-header">'+
-            (function(){var _hft=(gameState&&gameState.floor&&gameState.running!==false)?getFloorTheme(gameState.floor):null;return '<div class="rpg-header-title">⚔️ v0.2'+(_hft?' <span style="font-size:10px;color:'+_hft.color+';">'+_hft.icon+' '+gameState.floor+'F</span>':'')+'</div>';})()+
+            (function(){var _hft=(gameState&&gameState.floor&&gameState.running!==false)?getFloorTheme(gameState.floor):null;return '<div class="rpg-header-title">⚔️ v'+RPG_VERSION+(_hft?' <span style="font-size:10px;color:'+_hft.color+';">'+_hft.icon+' '+gameState.floor+'F</span>':'')+'</div>';})()+
             '<div style="display:flex;gap:6px;">'+
             '<button class="rpg-header-btn" id="rpg-scale-btn" title="UI 확대">'+(_uiScale===3?'🖥️':_uiScale===2?'🔍':'🔎')+'</button>'+
             '<button class="rpg-header-btn" id="rpg-grave-btn" title="묘지">🪦</button>'+
@@ -16699,7 +16709,7 @@ async function showRpgContainer() {
 }
 
 async function initRPG() {
-    console.log(PLUGIN_NAME+" 초기화 (v0.2, API 3.0)", _hasRisu ? "[Risu 환경]" : "[독립 실행]");
+    console.log(PLUGIN_NAME+" 초기화 (v"+RPG_VERSION+", API 3.0)", _hasRisu ? "[Risu 환경]" : "[독립 실행]");
 
     // onUnload 미지원 호스트에서도 초기화와 버튼 등록은 계속한다.
     if (_hasRisu) {
@@ -16797,7 +16807,61 @@ async function initRPG() {
     }
 
     console.log(PLUGIN_NAME+" 준비 완료!");
+    // 첫 화면을 막지 않도록 백그라운드에서 한 번 확인한다.
+    checkForUpdate().then(function(r){ if (r && r.newer && !gameState) render(); });
 }
+
+// ═══════════════════════════════════════
+//  업데이트 확인: RisuAI 플러그인 설정의 //@update-url 업데이트를 게임 안에서도 알린다.
+//  설치는 호스트(설정 → 플러그인)가 하고, 여기서는 최신 버전 표기만 읽는다.
+// ═══════════════════════════════════════
+var _updateInfo = null;      // { version } — 더 새 버전이 있을 때만
+var _updateChecking = null;  // 진행 중인 확인 Promise
+function compareVersions(a, b) {
+    var x = String(a).split(".").map(Number), y = String(b).split(".").map(Number);
+    for (var i = 0; i < Math.max(x.length, y.length); i++) {
+        var p = x[i] || 0, q = y[i] || 0;
+        if (p > q) return 1;
+        if (p < q) return -1;
+    }
+    return 0;
+}
+function parsePluginVersion(text) {
+    var m = /\/\/@version\s+([0-9][0-9.]*)/.exec(String(text || ""));
+    return m ? m[1] : null;
+}
+async function checkForUpdate() {
+    if (!_hasRisu || typeof Risuai.nativeFetch !== "function") return { ok:false, reason:"unsupported" };
+    if (_updateChecking) return _updateChecking;
+    _updateChecking = (async function() {
+        try {
+            var res = await Risuai.nativeFetch(RPG_UPDATE_URL, { method:"GET", headers:{ Range:"bytes=0-511" } });
+            if (!res || res.status < 200 || res.status >= 300) return { ok:false, reason:"http" };
+            var latest = parsePluginVersion(await res.text());
+            if (!latest) return { ok:false, reason:"parse" };
+            _updateInfo = compareVersions(latest, RPG_VERSION) > 0 ? { version:latest } : null;
+            return { ok:true, latest:latest, newer:!!_updateInfo };
+        } catch(e) {
+            console.warn(PLUGIN_NAME, "업데이트 확인 실패:", e);
+            return { ok:false, reason:"error" };
+        } finally { _updateChecking = null; }
+    })();
+    return _updateChecking;
+}
+function renderUpdateBanner() {
+    if (!_updateInfo) return "";
+    return '<div style="max-width:280px;margin:0 auto 10px;padding:8px;border:1px solid rgba(104,211,145,0.5);border-radius:8px;background:rgba(104,211,145,0.1);font-size:11px;color:#68d391;line-height:1.5;">' +
+        '🔔 새 버전 <b>v' + escHtml(_updateInfo.version) + '</b> 이 나왔어요 (현재 v' + RPG_VERSION + ').<br>' +
+        '<span style="color:rgba(255,255,255,0.65);font-size:10px;">RisuAI 설정 → 플러그인에서 이 플러그인의 업데이트를 누르세요. 업데이트 전에 📲 이전 코드로 세이브를 내보내 두면 안전합니다.</span></div>';
+}
+window.rpg_checkUpdate = async function(){
+    showToast("🔄 업데이트 확인 중...");
+    var r = await checkForUpdate();
+    if (!r.ok) showToast(r.reason === "unsupported" ? "이 환경에서는 업데이트를 확인할 수 없어요." : "업데이트 확인에 실패했어요. 잠시 후 다시 시도하세요.");
+    else if (r.newer) showToast("🔔 새 버전 v" + r.latest + " — 설정 → 플러그인에서 업데이트하세요.");
+    else showToast("✅ 최신 버전입니다 (v" + RPG_VERSION + ")");
+    render();
+};
 
 // ═══════════════════════════════════════
 //  봇 캐릭터 소환 (getCharacter 읽기 전용 — 카드에는 절대 쓰지 않음)

@@ -89,7 +89,7 @@ async function featureScreens(browser) {
     };
    });
    await page.addScriptTag({content:fs.readFileSync('Risulike RPG.js','utf8')});
-   await page.waitForFunction(()=>document.querySelector('.rpg-header-title')?.textContent.includes('0.2'));
+   await page.waitForFunction(()=>document.querySelector('.rpg-header-title')?.textContent.includes('0.3'));
    await page.evaluate(()=>{rpg_newGame();rpg_selectDifficulty(2);rpg_selectClass('warrior');rpg_confirmGender('female')});
    await page.evaluate(()=>rpg_toggleInventory());
    await page.waitForTimeout(150);

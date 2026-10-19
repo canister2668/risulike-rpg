@@ -84,7 +84,7 @@ test('UTF-8 transfer roundtrip',async t=>harness(t,`
 `));
 test('UI builds and main menu renders standalone',async t=>harness(t,`
  await initRPG(); assert.ok(document.getElementById(RPG_UI_ID));
- assert.ok(document.body.textContent.includes('0.2')); assert.equal(errors.length,0,errors.join(" | "));
+ assert.ok(document.body.textContent.includes('0.3')); assert.equal(errors.length,0,errors.join(" | "));
 `));
 test('all enemy templates scale across six difficulties and ten floors',async t=>harness(t,setup+`
  for(gameDifficulty=1;gameDifficulty<=6;gameDifficulty++) for(let floor=1;floor<=10;floor++) {
@@ -339,3 +339,34 @@ test('effect level and volume settings: reduced-motion default, persistence, aud
  _fxLevel='normal'; _triggerFx('.rpg-section','fx-player-hit',300); assert.ok(sec.classList.contains('fx-player-hit'));
  assert.equal(errors.length,0,errors.join(' | '));
 `));
+test('afterimage counter-kill schedules victory instead of soft-locking the turn',async t=>harness(t,setup+`
+ const timers=[]; window.setTimeout=fn=>{timers.push(fn);return timers.length};
+ fxEnemyAttackMiss=fxSkill=playAttackSound=function(){};
+ currentEnemy=spawnEnemy('slime',1); currentEnemy.hp=1; battlePhase='enemyTurn'; gameState.phase='battle';
+ hasPassive=k=>k==='afterimage'?1:0; Math.random=()=>0.1;
+ let victories=0; handleVictory=()=>{victories++};
+ assert.equal(applyDamageToPlayer(50),0);
+ assert.equal(currentEnemy.hp,0);
+ timers.splice(0).forEach(fn=>fn());
+ assert.equal(victories,1);
+`));
+test('plugin header declares update URL and version where RisuAI reads them',()=>{
+ const head=Buffer.from(source).subarray(0,500).toString('utf8');
+ const v=/^\/\/@version (\S+)$/m.exec(head); const u=/^\/\/@update-url (\S+)$/m.exec(source.slice(0,2000));
+ assert.ok(v,'version within first 500 bytes'); assert.ok(u,'update-url present');
+ assert.equal(new URL(u[1]).protocol,'https:');
+ assert.equal(/const RPG_VERSION\s*=\s*"([^"]+)"/.exec(source)[1],v[1]);
+ assert.equal(/const RPG_UPDATE_URL\s*=\s*"([^"]+)"/.exec(source)[1],u[1]);
+ assert.equal(JSON.parse(fs.readFileSync('package.json','utf8')).version.replace(/\.0$/,''),v[1]);
+});
+test('in-game update check reports newer, current and failed lookups',async t=>harness(t,`
+ let served='//@name Risulike RPG\\n//@version 9.9\\n', calls=[];
+ Risuai.nativeFetch=async(url,opt)=>{calls.push([url,opt]); return {status:206,text:async()=>served}};
+ let r=await checkForUpdate(); assert.deepEqual(r,{ok:true,latest:'9.9',newer:true});
+ assert.equal(calls[0][0],RPG_UPDATE_URL); assert.equal(calls[0][1].headers.Range,'bytes=0-511');
+ assert.ok(renderUpdateBanner().includes('v9.9')); assert.ok(renderMainMenu().includes('v9.9'));
+ served='//@version '+RPG_VERSION+'\\n'; r=await checkForUpdate(); assert.equal(r.newer,false); assert.equal(renderUpdateBanner(),'');
+ served='//@version 0.0.1\\n'; assert.equal((await checkForUpdate()).newer,false);
+ Risuai.nativeFetch=async()=>{throw new Error('offline')}; assert.equal((await checkForUpdate()).ok,false);
+ assert.equal(compareVersions('0.10','0.9'),1); assert.equal(compareVersions('0.3','0.3.0'),0);
+`,{risu:true}));
