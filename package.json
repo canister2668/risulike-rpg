@@ -7,10 +7,14 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "node --test tests/game.test.cjs",
+    "test": "node --test tests/game.test.cjs tests/sim.test.cjs",
     "lint": "eslint \"Risulike RPG.js\"",
     "check": "node --check \"Risulike RPG.js\" && npm run lint && npm test",
-    "test:browser": "node tests/browser.cjs"
+    "test:browser": "node tests/browser.cjs",
+    "sim": "node tools/sim/simulate.cjs",
+    "sim:report": "node tools/sim/analyze.cjs",
+    "sim:skills": "node tools/sim/skill-bench.cjs",
+    "sim:allies": "node tools/sim/ally-bench.cjs"
   },
   "keywords": [],
   "author": "",

@@ -4,3 +4,4 @@ playwright-report/
 *.log
 .env
 .env.*
+sim-out/
