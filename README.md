@@ -51,11 +51,20 @@ npx playwright install chromium
 npm run test:browser
 ```
 
+밸런스 시뮬레이터(헤드리스 자동 플레이, 시드 고정)는 기본 검사와 별도로 실행합니다:
+
+```sh
+npm run sim -- --runs 50 --diffs 1-6 --out sim-out/base.jsonl
+npm run sim:report -- sim-out/base.jsonl
+```
+
+방법·결과·조정 내역은 [밸런스 검토](docs/BALANCE.md)에 있습니다.
+
 브라우저 테스트는 API 모의 객체를 사용합니다. 공식 RisuAI 통합 테스트를 대신하지 않습니다. `CHROMIUM_PATH`로 기존 브라우저 실행 파일을, `SCREENSHOT_DIR`로 스크린샷 저장 폴더를 지정할 수 있습니다.
 
 34개 로직/DOM 테스트(v0.1의 25개 + 새 기능 9개)와 파일 전체 정적 검사를 통과했습니다. 이번에는 브라우저 테스트도 Chromium 141(헤드리스, API 모의 객체)에서 데스크톱·모바일 스모크와 새 기능 화면까지 통과했습니다. 실제 공식 RisuAI 웹/앱에서의 설치·권한·iframe 다운로드 허용 여부·모델 응답·장시간 플레이·밸런스(동료 역할 수치 포함)는 미검증입니다.
 
-자세한 내용: [검수 보고서](docs/AUDIT.md), [신규 아이디어](docs/IDEAS.md), [검증 메타데이터](docs/verification.json).
+자세한 내용: [검수 보고서](docs/AUDIT.md), [신규 아이디어](docs/IDEAS.md), [밸런스 검토](docs/BALANCE.md), [검증 메타데이터](docs/verification.json).
 
 ## 라이선스
 
