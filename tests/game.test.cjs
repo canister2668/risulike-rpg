@@ -314,3 +314,28 @@ test('companion roles tune only Lilith/Helena trigger rates and effect weights',
  assert.ok(renderAllyRolePanel().includes("rpg_setAllyRole")); assert.equal(setAllyRole('helena','bogus'),false);
  assert.equal(setAllyRole('lilith','guard'),true); assert.equal(JSON.parse(JSON.stringify(gameState)).allyRoles.lilith,'guard');
 `));
+test('effect level and volume settings: reduced-motion default, persistence, audio gain',async t=>harness(t,`
+ window.matchMedia=q=>({matches:q.includes('prefers-reduced-motion')});
+ await initRPG(); assert.equal(_fxLevel,'reduced'); assert.equal(_sfxVolume,100);
+ assert.ok(document.documentElement.classList.contains('rpg-fx-reduced'));
+ assert.ok(document.body.innerHTML.includes('rpg_cycleFxLevel')); assert.ok(document.getElementById('rpg-menu-volume'));
+ rpg_cycleFxLevel(); assert.equal(_fxLevel,'off'); assert.ok(document.documentElement.classList.contains('rpg-fx-off'));
+ const vol=document.getElementById('rpg-menu-volume'); vol.value='35'; vol.dispatchEvent(new window.Event('change'));
+ assert.equal(_sfxVolume,35); await new Promise(r=>window.setTimeout(r,5));
+ assert.deepEqual(JSON.parse(localStorage.getItem(KEY_UI_SETTINGS)),{fx:'off',volume:35});
+ _fxLevel='normal'; _sfxVolume=100; await loadUiSettings(); assert.equal(_fxLevel,'off'); assert.equal(_sfxVolume,35);
+ localStorage.setItem(KEY_UI_SETTINGS,JSON.stringify({fx:'bogus',volume:999})); window.matchMedia=()=>({matches:false});
+ await loadUiSettings(); assert.equal(_fxLevel,'normal'); assert.equal(_sfxVolume,100);
+ // 오디오: 마스터 게인이 음량을 따르고, 0이면 AudioContext를 만들지 않는다
+ let created=0, gains=[]; window.AudioContext=function(){created++; this.currentTime=0; this.destination={};
+  this.createGain=()=>{const g={gain:{value:1,setValueAtTime(){},exponentialRampToValueAtTime(){}},connect(){},context:this};gains.push(g);return g};
+  this.createOscillator=()=>({frequency:{value:0},connect(){},start(){},stop(){}});};
+ setSfxVolume(0); playTone(440); assert.equal(created,0);
+ setSfxVolume(40); playTone(440); assert.equal(created,1); assert.equal(_audioOut.gain.value,0.4);
+ // 효과 끄기: 화면 흔들림 클래스가 붙지 않음
+ const sec=document.createElement('div'); sec.className='rpg-section'; document.getElementById(RPG_UI_ID).appendChild(sec);
+ _fxLevel='off'; _triggerFx('.rpg-section','fx-player-hit',300); assert.ok(!sec.classList.contains('fx-player-hit'));
+ _fxLevel='reduced'; _triggerFx('.rpg-section','fx-player-hit',300); assert.ok(!sec.classList.contains('fx-player-hit'));
+ _fxLevel='normal'; _triggerFx('.rpg-section','fx-player-hit',300); assert.ok(sec.classList.contains('fx-player-hit'));
+ assert.equal(errors.length,0,errors.join(' | '));
+`));

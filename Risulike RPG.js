@@ -41,15 +41,63 @@ async function lsSet(key, val) {
 //#region 🔊 오디오 (v3 — 포먼트 음성 합성 + 타격감 강화)
 let _audioCtx = null;
 function getAudioCtx() { if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)(); return _audioCtx; }
+// ─── 효과·음량 설정 (기기별 전역 설정 키, 세이브와 무관) ───
+var KEY_UI_SETTINGS = "RISUlike RPG::uiSettings";
+var FX_LEVELS = { normal:"기본", reduced:"약하게", off:"끄기" };
+var _fxLevel = "normal";   // normal | reduced | off
+var _sfxVolume = 100;      // 0~100
+var _audioOut = null;
+// 모든 효과음은 이 마스터 게인을 거친다.
+function getAudioOut() {
+    var ctx = getAudioCtx();
+    if (!_audioOut || _audioOut.context !== ctx) { _audioOut = ctx.createGain(); _audioOut.connect(ctx.destination); }
+    _audioOut.gain.value = _sfxVolume / 100;
+    return _audioOut;
+}
+function prefersReducedMotion() {
+    try { return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); } catch(e) { return false; }
+}
+async function loadUiSettings() {
+    var saved = null;
+    try { saved = JSON.parse((await lsGet(KEY_UI_SETTINGS)) || "null"); } catch(e) { saved = null; }
+    _fxLevel = (saved && Object.hasOwn(FX_LEVELS, saved.fx || "")) ? saved.fx : (prefersReducedMotion() ? "reduced" : "normal");
+    var v = saved ? Number(saved.volume) : 100;
+    _sfxVolume = Number.isFinite(v) ? Math.max(0, Math.min(100, Math.round(v))) : 100;
+    applyFxLevelClass();
+}
+async function saveUiSettings() { await lsSet(KEY_UI_SETTINGS, JSON.stringify({ fx:_fxLevel, volume:_sfxVolume })); }
+function applyFxLevelClass() {
+    var targets = [document.documentElement, document.getElementById(RPG_UI_ID)];
+    for (var i = 0; i < targets.length; i++) {
+        if (!targets[i]) continue;
+        targets[i].classList.toggle("rpg-fx-reduced", _fxLevel === "reduced");
+        targets[i].classList.toggle("rpg-fx-off", _fxLevel === "off");
+    }
+}
+function setFxLevel(level) {
+    if (!Object.hasOwn(FX_LEVELS, level)) return false;
+    _fxLevel = level; applyFxLevelClass(); saveUiSettings();
+    return true;
+}
+function setSfxVolume(v, persist) {
+    v = Number(v);
+    if (!Number.isFinite(v)) return false;
+    _sfxVolume = Math.max(0, Math.min(100, Math.round(v)));
+    if (_audioOut) _audioOut.gain.value = _sfxVolume / 100;
+    if (persist !== false) saveUiSettings();
+    return true;
+}
 
 // 기본 톤
 function playTone(freq, duration, type, gain) {
+    if (_sfxVolume <= 0) return; // 음량 0이면 AudioContext도 만들지 않는다
     duration=duration||0.15; type=type||'sine'; gain=gain||0.3;
-    try { const ctx=getAudioCtx(),osc=ctx.createOscillator(),g=ctx.createGain(); osc.connect(g);g.connect(ctx.destination); osc.frequency.value=freq;osc.type=type; const now=ctx.currentTime; g.gain.setValueAtTime(gain,now); g.gain.exponentialRampToValueAtTime(0.001,now+duration); osc.start(now);osc.stop(now+duration); } catch(e){ console.warn("[RPG] error:", e); }
+    try { const ctx=getAudioCtx(),osc=ctx.createOscillator(),g=ctx.createGain(); osc.connect(g);g.connect(getAudioOut()); osc.frequency.value=freq;osc.type=type; const now=ctx.currentTime; g.gain.setValueAtTime(gain,now); g.gain.exponentialRampToValueAtTime(0.001,now+duration); osc.start(now);osc.stop(now+duration); } catch(e){ console.warn("[RPG] error:", e); }
 }
 
 // 노이즈 버스트
 function _playNoise(duration, gain, filterFreq) {
+    if (_sfxVolume <= 0) return; // 음량 0이면 AudioContext도 만들지 않는다
     try {
         var ctx=getAudioCtx(), bufSize=Math.max(1,Math.floor(ctx.sampleRate*duration)), buf=ctx.createBuffer(1,bufSize,ctx.sampleRate);
         var data=buf.getChannelData(0); for(var i=0;i<bufSize;i++) data[i]=(Math.random()*2-1);
@@ -57,16 +105,17 @@ function _playNoise(duration, gain, filterFreq) {
         var flt=ctx.createBiquadFilter(); flt.type="lowpass"; flt.frequency.value=filterFreq||2000;
         var g=ctx.createGain(); var now=ctx.currentTime;
         g.gain.setValueAtTime(gain||0.3,now); g.gain.exponentialRampToValueAtTime(0.001,now+duration);
-        src.connect(flt); flt.connect(g); g.connect(ctx.destination);
+        src.connect(flt); flt.connect(g); g.connect(getAudioOut());
         src.start(now); src.stop(now+duration);
     } catch(e){ console.warn("[RPG] error:", e); }
 }
 
 // 피치 슬라이드 톤
 function _playSweep(startFreq, endFreq, duration, type, gain) {
+    if (_sfxVolume <= 0) return; // 음량 0이면 AudioContext도 만들지 않는다
     try {
         var ctx=getAudioCtx(),osc=ctx.createOscillator(),g=ctx.createGain();
-        osc.connect(g); g.connect(ctx.destination); osc.type=type||'sine';
+        osc.connect(g); g.connect(getAudioOut()); osc.type=type||'sine';
         var now=ctx.currentTime;
         osc.frequency.setValueAtTime(startFreq,now);
         osc.frequency.exponentialRampToValueAtTime(Math.max(20,endFreq),now+duration);
@@ -77,9 +126,10 @@ function _playSweep(startFreq, endFreq, duration, type, gain) {
 
 // 레이어드 톤
 function _playLayered(freq, duration, type1, type2, gain, detune) {
+    if (_sfxVolume <= 0) return; // 음량 0이면 AudioContext도 만들지 않는다
     try {
         var ctx=getAudioCtx(), now=ctx.currentTime;
-        var g=ctx.createGain(); g.connect(ctx.destination);
+        var g=ctx.createGain(); g.connect(getAudioOut());
         g.gain.setValueAtTime(gain||0.3,now); g.gain.exponentialRampToValueAtTime(0.001,now+duration);
         var osc1=ctx.createOscillator(); osc1.type=type1||'sawtooth'; osc1.frequency.value=freq; osc1.connect(g); osc1.start(now); osc1.stop(now+duration);
         var osc2=ctx.createOscillator(); osc2.type=type2||'square'; osc2.frequency.value=freq; osc2.detune.value=detune||7; osc2.connect(g); osc2.start(now); osc2.stop(now+duration);
@@ -94,6 +144,7 @@ var _formants = {
 };
 
 function _playVoice(vowel, pitch, duration, gain) {
+    if (_sfxVolume <= 0) return; // 음량 0이면 AudioContext도 만들지 않는다
     try {
         var ctx=getAudioCtx(), now=ctx.currentTime;
         var f = _formants[vowel] || _formants.a;
@@ -111,7 +162,7 @@ function _playVoice(vowel, pitch, duration, gain) {
         master.gain.exponentialRampToValueAtTime(0.001, now+duration);
         osc.connect(f1); f1.connect(g1); g1.connect(master);
         osc.connect(f2); f2.connect(g2); g2.connect(master);
-        master.connect(ctx.destination);
+        master.connect(getAudioOut());
         osc.start(now); osc.stop(now+duration);
     } catch(e){ console.warn("[RPG] error:", e); }
 }
@@ -244,6 +295,9 @@ var ABILITY_SHORT = { str:"STR", dex:"DEX", con:"CON", int:"INT", wis:"WIS", cha
 // ═══════════════════════════════════════
 // ═══ 전투 이펙트 트리거 ═══
 function _triggerFx(selector, fxClass, duration) {
+    if (_fxLevel === "off") return;
+    // 약하게: 적/초상화의 국소 효과만, 패널 전체 흔들림·번쩍임은 생략
+    if (_fxLevel === "reduced" && selector === ".rpg-section") return;
     try {
         var container = document.getElementById(RPG_UI_ID);
         var el = container ? container.querySelector(selector) : null;
@@ -316,7 +370,7 @@ function fxPlayerShield(){if(!_fxAttack)return; _triggerFx('.rpg-portrait-sm', '
 
 // ═══ 궁극기 전용 이펙트 ═══
 function fxUltimate(type) {
-    if (!_fxAttack) return;
+    if (!_fxAttack || _fxLevel !== "normal") return;
     try {
         var container = document.getElementById(RPG_UI_ID);
         if (!container) return;
@@ -495,7 +549,7 @@ function getClassAttackFx() {
     return m[player.classKey] || 'slash';
 }
 function fxSkill(type) {
-    if (!_fxAttack) return;
+    if (!_fxAttack || _fxLevel !== "normal") return;
     try {
         var container = document.getElementById(RPG_UI_ID);
         if (!container) return;
@@ -12202,6 +12256,9 @@ function injectStyles() {
     style.id = RPG_STYLE_ID;
     style.textContent = `
     * { box-sizing: border-box; }
+    /* 효과 설정: 약하게 = 반복 애니메이션 1회로 제한, 끄기 = 애니메이션·전환을 즉시 끝 상태로 */
+    .rpg-fx-reduced *, .rpg-fx-reduced *::before, .rpg-fx-reduced *::after { animation-iteration-count: 1 !important; }
+    .rpg-fx-off *, .rpg-fx-off *::before, .rpg-fx-off *::after { animation-duration: 0.001ms !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; transition-delay: 0s !important; }
     ` + (_hasRisu ? `
     html, body { background: transparent; overflow: hidden; width: 100%; height: 100%; margin: 0; padding: 0; pointer-events: none; touch-action: none; }
     #${RPG_UI_ID}, .rpg-toast, #rpg-standalone-toggle { pointer-events: auto; touch-action: auto; -webkit-overflow-scrolling: touch; }
@@ -12998,6 +13055,11 @@ function render() {
         if(_mnFxA) _mnFxA.addEventListener("click", function(){ _fxAttack=!_fxAttack; showToast("⚔️ 공격모션 "+(_fxAttack?"ON":"OFF")); render(); });
         if(_mnFxE) _mnFxE.addEventListener("click", function(){ _fxEquip=!_fxEquip; showToast("✨ 장비이펙트 "+(_fxEquip?"ON":"OFF")); render(); });
         if(_mnFxR) _mnFxR.addEventListener("click", function(){ _fxRoom=!_fxRoom; showToast("🚪 방이펙트 "+(_fxRoom?"ON":"OFF")); render(); });
+        var _mnVol = body.querySelector("#rpg-menu-volume");
+        if(_mnVol) {
+            _mnVol.addEventListener("input", function(){ setSfxVolume(_mnVol.value, false); var _vv = body.querySelector("#rpg-menu-volume-val"); if (_vv) _vv.textContent = String(_sfxVolume); });
+            _mnVol.addEventListener("change", function(){ setSfxVolume(_mnVol.value, true); if (_sfxVolume > 0) playTone(880, 0.08, 'triangle', 0.2); render(); });
+        }
         return;
     }
     if(!gameState.running&&battlePhase==="defeat"){body.innerHTML=renderGameOver();bindInlineHandlers(body);return;}
@@ -15328,6 +15390,12 @@ function renderMainMenu() {
         '<button class="rpg-btn" style="flex:1;padding:5px 4px;font-size:9px;background:'+(_fxAttack?'rgba(72,187,120,0.15)':'rgba(252,129,129,0.1)')+';border:1px solid '+(_fxAttack?'rgba(72,187,120,0.4)':'rgba(252,129,129,0.3)')+';color:'+(_fxAttack?'#48bb78':'#fc8181')+';" id="rpg-menu-fx-attack">⚔️ 공격모션 '+(_fxAttack?'ON':'OFF')+'</button>'+
         '<button class="rpg-btn" style="flex:1;padding:5px 4px;font-size:9px;background:'+(_fxEquip?'rgba(72,187,120,0.15)':'rgba(252,129,129,0.1)')+';border:1px solid '+(_fxEquip?'rgba(72,187,120,0.4)':'rgba(252,129,129,0.3)')+';color:'+(_fxEquip?'#48bb78':'#fc8181')+';" id="rpg-menu-fx-equip">✨ 장비 '+(_fxEquip?'ON':'OFF')+'</button>'+
         '<button class="rpg-btn" style="flex:1;padding:5px 4px;font-size:9px;background:'+(_fxRoom?'rgba(72,187,120,0.15)':'rgba(252,129,129,0.1)')+';border:1px solid '+(_fxRoom?'rgba(72,187,120,0.4)':'rgba(252,129,129,0.3)')+';color:'+(_fxRoom?'#48bb78':'#fc8181')+';" id="rpg-menu-fx-room">🚪 방 '+(_fxRoom?'ON':'OFF')+'</button>'+
+        '</div>'+
+        '<div style="display:flex;gap:6px;align-items:center;margin-top:6px;max-width:280px;margin-left:auto;margin-right:auto;">'+
+        '<button class="rpg-btn" style="flex:0 0 auto;padding:5px 8px;font-size:9px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.2);color:#e2e8f0;" data-action="rpg_cycleFxLevel" title="흔들림·번쩍임 등 화면 효과">🎞️ 효과 '+FX_LEVELS[_fxLevel]+'</button>'+
+        '<label style="flex:1;display:flex;align-items:center;gap:4px;font-size:9px;color:rgba(255,255,255,0.6);">'+(_sfxVolume>0?'🔊':'🔇')+
+        '<input type="range" id="rpg-menu-volume" min="0" max="100" step="5" value="'+_sfxVolume+'" aria-label="효과음 음량" style="flex:1;min-width:0;" />'+
+        '<span id="rpg-menu-volume-val" style="width:24px;text-align:right;">'+_sfxVolume+'</span></label>'+
         '</div>';
 }
 
@@ -15747,6 +15815,11 @@ function autocastFreeTurnSkills() {
     }
 }
 window.rpg_newGame     = function(){ startNewGame(); };
+window.rpg_cycleFxLevel = function(){
+    var order = ["normal","reduced","off"];
+    setFxLevel(order[(order.indexOf(_fxLevel) + 1) % order.length]);
+    showToast("🎞️ 화면 효과: " + FX_LEVELS[_fxLevel]); render();
+};
 window.rpg_showNewGameConfirm = function(){
     _showNewGameConfirm = true; render();
 };
@@ -16672,8 +16745,12 @@ async function initRPG() {
         setupDraggableIcon();
     }
 
+    // 효과·음량 설정은 첫 렌더 전에 (저장값이 없으면 prefers-reduced-motion 반영)
+    await loadUiSettings();
+
     // UI 빌드
     createUI();
+    applyFxLevelClass();
 
     // 글로벌 진행 데이터는 첫 렌더보다 먼저 불러와 기본값 덮어쓰기를 막는다.
     await loadAchievements();
