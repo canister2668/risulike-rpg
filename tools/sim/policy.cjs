@@ -84,6 +84,7 @@ class Policy {
         // event
         const ev = gs.currentEvent || '';
         if (ev.indexOf('quest_') === 0 || by('rpg_questChoice').length) {
+            if (this.opts.ignoreLilith) { const ig = acts.find(x => x.name === 'rpg_questChoice' && x.args[0] === 'dg_ignore'); if (ig) return ig; }
             for (const c of QUEST_PREF) {
                 const a = acts.find(x => x.name === 'rpg_questChoice' && x.args[0] === c);
                 if (a) {

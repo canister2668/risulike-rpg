@@ -70,7 +70,7 @@ function reachTable(runs) {
     }
     return T;
 }
-function adoption(runs, field, minN) {
+function adoption(runs, field, minN, rarityOf = () => '') {
     const T = reachTable(runs);
     const acc = new Map();
     for (const r of runs) {
@@ -84,11 +84,18 @@ function adoption(runs, field, minN) {
             a.n++; a.obs += r.cleared ? 1 : 0; a.exp += p; a.var += p * (1 - p); a.floors += f;
         }
     }
+    // 무엇이든 하나 더 얻은 런은 그 자체로 약간 유리하므로(이벤트를 하나 더 거침), 같은 희귀도 항목들의
+    // 평균 차이를 빼고 남는 잔차로 이상치를 고른다.
     const rows = [];
     for (const [id, a] of acc) {
         if (a.n < minN) continue;
-        const z = a.var > 0 ? (a.obs - a.exp) / Math.sqrt(a.var) : 0;
-        rows.push({id, n: a.n, obs: a.obs / a.n, exp: a.exp / a.n, lift: (a.obs - a.exp) / a.n, z, floor: a.floors / a.n});
+        rows.push({id, n: a.n, obs: a.obs / a.n, exp: a.exp / a.n, lift: (a.obs - a.exp) / a.n, floor: a.floors / a.n, _a: a, rarity: rarityOf(id)});
+    }
+    const byR = groupBy(rows, r => r.rarity);
+    for (const [, rs] of byR) {
+        const tot = rs.reduce((s, r) => s + r._a.n, 0);
+        const m = rs.reduce((s, r) => s + r._a.obs - r._a.exp, 0) / Math.max(1, tot);
+        for (const r of rs) { r.groupLift = m; r.resid = r.lift - m; r.z = r._a.var > 0 ? (r._a.obs - r._a.exp - m * r._a.n) / Math.sqrt(r._a.var) : 0; delete r._a; }
     }
     return rows.sort((x, y) => y.z - x.z);
 }
@@ -160,20 +167,20 @@ function report(runs, names, opts = {}) {
     }).join(' · '));
     if (opts.items !== false) {
         for (const [field, label, dict] of [['passives', '패시브(획득형)', names.pa], ['equips', '장비', names.eq]]) {
-            const rows = adoption(runs, field, opts.minN || 40);
+            const rows = adoption(runs, field, opts.minN || 40, id => (dict[id] || {}).rarity || '');
             L.push('');
             L.push(`### ${label} 채택 시 클리어율 이상치`);
             L.push('');
-            L.push(`기대 클리어율 = 같은 직업·난이도에서 획득 층에 도달한 런의 클리어율(생존 편향 보정). |z| ≥ 3, 채택 ${opts.minN || 40}런 이상만. 분석 대상 ${rows.length}개.`);
+            L.push(`기대 클리어율 = 같은 직업·난이도에서 획득 층에 도달한 런의 클리어율(생존 편향 보정). 잔차 = (관측 − 기대) − 같은 희귀도 평균 차이. 잔차의 |z| ≥ 3, 채택 ${opts.minN || 40}런 이상만. 분석 대상 ${rows.length}개.`);
             L.push('');
-            L.push('| 항목 | 희귀도 | 채택 런 | 평균 획득 층 | 관측 클리어율 | 기대 | 차이 | z |');
-            L.push('|---|---|---:|---:|---:|---:|---:|---:|');
+            L.push('| 항목 | 희귀도 | 채택 런 | 평균 획득 층 | 관측 클리어율 | 기대 | 차이 | 희귀도 평균 차이 | 잔차 | z |');
+            L.push('|---|---|---:|---:|---:|---:|---:|---:|---:|---:|');
             const outl = rows.filter(r => Math.abs(r.z) >= 3);
             for (const r of outl) {
                 const nm = dict[r.id] || {};
-                L.push(`| ${nm.name || r.id} (\`${r.id}\`) | ${nm.rarity || '–'} | ${r.n} | ${r.floor.toFixed(1)} | ${pct(r.obs)}% | ${pct(r.exp)}% | ${r.lift >= 0 ? '+' : ''}${pct(r.lift)}%p | ${r.z.toFixed(1)} |`);
+                L.push(`| ${nm.name || r.id} (\`${r.id}\`) | ${nm.rarity || '–'} | ${r.n} | ${r.floor.toFixed(1)} | ${pct(r.obs)}% | ${pct(r.exp)}% | ${r.lift >= 0 ? '+' : ''}${pct(r.lift)}%p | ${r.groupLift >= 0 ? '+' : ''}${pct(r.groupLift)}%p | ${r.resid >= 0 ? '+' : ''}${pct(r.resid)}%p | ${r.z.toFixed(1)} |`);
             }
-            if (!outl.length) L.push('| (없음) | | | | | | | |');
+            if (!outl.length) L.push('| (없음) | | | | | | | | | |');
         }
     }
     return {md: L.join('\n'), S};

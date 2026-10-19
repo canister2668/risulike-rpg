@@ -29,6 +29,7 @@ function policyOpts(a) {
     if (a.botAlly) o.botAlly = true;
     if (a.botBossFloor) o.botBossFloor = +a.botBossFloor;
     if (a.roles) o.roles = a.roles;
+    if (a.ignoreLilith) o.ignoreLilith = true;
     if (a.dragonNest) o.dragonNest = a.dragonNest;
     if (a.noDefendCharge) o.defendCharge = false;
     if (a.potionBattleHp) o.potionBattleHp = +a.potionBattleHp;
