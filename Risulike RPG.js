@@ -10760,7 +10760,7 @@ function enemyTurn() {
         // 1F 레트킹: 연속공격 2회 (약한 피해)
         if (bossKey === "ratKing" && bt2 > 0) {
             currentEnemy._multiAttack = 2;
-            currentEnemy._multiDmgScale = 0.6;
+            currentEnemy._multiDmgScale = 0.45; // 0.6→0.45: 연속공격은 방어·DR이 적용되지 않고 난이도 고정%가 타격마다 붙음 (docs/BALANCE.md)
             if (bt2 === 1) currentEnemy._dialogue = "크킥킥! 쥐떼들아, 물어뜯어라!";
             else if (bt2 % 3 === 0) currentEnemy._dialogue = "킥킥... 도망칠 수 없다!";
         }
