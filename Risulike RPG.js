@@ -4522,7 +4522,7 @@ async function slotSaveAll() {
     if (!player || !gameState) return true;
     var p = JSON.stringify(player), g = JSON.stringify(gameState), slot = _activeSlot;
     var slotData = JSON.stringify({player:p, gameState:g, timestamp:Date.now(),
-        summary:(DIFFICULTY_DEFS[gameDifficulty] ? DIFFICULTY_DEFS[gameDifficulty].icon+" " : "") + player.icon+" "+player.name+" Lv."+player.level+" "+gameState.floor+"F"});
+        summary:buildSlotSummary(player, gameState, gameDifficulty)});
     return enqueueSave(async function() {
         await writeSaveValue(KEY_PLAYER, p);
         await writeSaveValue(KEY_STATE, g);
@@ -4543,6 +4543,20 @@ async function writeSaveValue(key, value) {
     if (_hasRisu) await Risuai.setArgument(key, value);
     else if (value === "") localStorage.removeItem(key);
     else localStorage.setItem(key, value);
+}
+async function readSaveValue(key) {
+    var raw = _hasRisu ? await Risuai.getArgument(key) : localStorage.getItem(key);
+    return raw ? raw : null;
+}
+// 슬롯 요약 문자열 (자동저장·가져오기·미리보기 공용)
+function buildSlotSummary(p, g, difficulty) {
+    var diff = difficulty || (g && g.difficulty);
+    return (diff && DIFFICULTY_DEFS[diff] ? DIFFICULTY_DEFS[diff].icon + " " : "") +
+        (p.icon || "") + " " + (p.name || "?") + " Lv." + (p.level || 1) + " " + ((g && g.floor) || 1) + "F";
+}
+// 새 UI에서 사용자/저장 코드 문자열을 HTML에 넣을 때 사용
+function escHtml(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; });
 }
 function validSlot(n) { return Number.isInteger(n) && n >= 1 && n <= SLOT_COUNT; }
 function validateSavePair(p, g) {
@@ -4721,35 +4735,182 @@ function exportSaveCode() {
     })();
 }
 
+// ─── 저장 코드 해석 (미리보기와 실제 가져오기가 같은 검사를 사용) ───
+function parseSaveCode(code) {
+    code = String(code || "").trim().replace(/\s+/g, '');
+    var data = JSON.parse(base64ToUtf8(code));
+    if (!data || typeof data !== "object") throw new Error("잘못된 저장 코드");
+    if (data.v === 2 && data.slots) {
+        var slotIds = Object.keys(data.slots);
+        if (!slotIds.length || slotIds.some(function(id){ return !validSlot(Number(id)) || String(Number(id)) !== id; })) throw new Error("슬롯 범위는 1~5입니다");
+        slotIds.forEach(function(id){ var entry=data.slots[id]; validateSavePair(entry && entry.p, entry && entry.g); });
+        return { kind:"v2", data:data, slots:slotIds.map(Number) };
+    }
+    if (data.p && data.g) {
+        validateSavePair(data.p, data.g);
+        return { kind:"v1", data:data, slots:[1] };
+    }
+    return { kind:null, data:data, slots:[] };
+}
+
+// ─── 가져오기 복원 지점: 교체 직전 슬롯(및 v1의 이어하기, v2의 전역 기록)을 키 1개에 보관 ───
+var KEY_RESTORE_POINT = "RISUlike RPG::importRestorePoint";
+var _restorePointInfo = null;   // {timestamp, slots:[n]} — 슬롯 메뉴 표시용
+var _undoImportConfirm = false;
+var _importPreview = null;      // {code, kind, rows, globals, main}
+function snapshotGlobalRecords() {
+    return JSON.parse(JSON.stringify({ achievements:_achievements, stats:_achievementStats, graveyard:_graveyard, codex:_codex, starShop:_starShop }));
+}
+// enqueueSave 내부에서만 호출 (교체 쓰기와 같은 직렬 큐)
+async function writeRestorePoint(slots, opts) {
+    opts = opts || {};
+    var point = { v:1, timestamp:Date.now(), slots:{} };
+    for (var i = 0; i < slots.length; i++) point.slots[slots[i]] = await readSaveValue(slotKey(slots[i]));
+    if (opts.main) point.main = { player: await readSaveValue(KEY_PLAYER), state: await readSaveValue(KEY_STATE) };
+    if (opts.globals) point.globals = opts.globals;
+    await writeSaveValue(KEY_RESTORE_POINT, JSON.stringify(point));
+}
+async function loadRestorePointInfo() {
+    try {
+        var raw = await readSaveValue(KEY_RESTORE_POINT);
+        if (!raw) { _restorePointInfo = null; return null; }
+        var rp = JSON.parse(raw);
+        _restorePointInfo = { timestamp: rp.timestamp || 0, slots: Object.keys(rp.slots || {}).map(Number).filter(validSlot), main: !!rp.main, globals: !!rp.globals };
+    } catch(e) { _restorePointInfo = null; }
+    return _restorePointInfo;
+}
+async function undoImport() {
+    if (gameState && gameState.running) { showToast("진행 중인 게임을 종료한 뒤 되돌리세요."); return false; }
+    await _saveQueue;
+    var rp;
+    try { var raw = await readSaveValue(KEY_RESTORE_POINT); rp = raw ? JSON.parse(raw) : null; }
+    catch(e) { rp = null; }
+    if (!rp || !rp.slots) { showToast("되돌릴 가져오기 기록이 없습니다."); _restorePointInfo = null; render(); return false; }
+    var ok = await enqueueSave(async function() {
+        for (var k in rp.slots) {
+            if (validSlot(Number(k))) await writeSaveValue(slotKey(Number(k)), rp.slots[k] || "");
+        }
+        if (rp.main) {
+            await writeSaveValue(KEY_PLAYER, rp.main.player || "");
+            await writeSaveValue(KEY_STATE, rp.main.state || "");
+        }
+        await writeSaveValue(KEY_RESTORE_POINT, "");
+    });
+    if (!ok) return false;
+    if (rp.globals) {
+        var gl = rp.globals;
+        if (gl.achievements) _achievements = gl.achievements;
+        if (gl.stats) _achievementStats = gl.stats;
+        if (Array.isArray(gl.graveyard)) _graveyard = gl.graveyard;
+        if (gl.codex) _codex = gl.codex;
+        if (gl.starShop) _starShop = gl.starShop;
+        await saveAchievements(); await saveGraveyard(); await saveCodex();
+        if (_starShop) await saveStarShop();
+    }
+    player = null; gameState = null; currentEnemy = null; battlePhase = "";
+    _activeSlot = 0;
+    _restorePointInfo = null; _undoImportConfirm = false;
+    _slotSummaries = await getSlotSummaries();
+    showToast("↩️ 가져오기 이전 상태로 되돌렸습니다.");
+    render();
+    return true;
+}
+
+// 가져오기 전에 덮어쓸 슬롯의 현재/새 요약을 보여주고 명시적 확인을 받는다.
+async function previewImportCode(code) {
+    if (gameState && gameState.running) { showToast("진행 중인 게임을 종료한 뒤 가져오세요."); return null; }
+    var parsed;
+    try { parsed = parseSaveCode(code); }
+    catch(e) { showToast("❌ 코드 파싱 실패!"); console.error(e); return null; }
+    if (!parsed.kind) { showToast("❌ 잘못된 코드!"); return null; }
+    await _saveQueue;
+    var current = await getSlotSummaries();
+    var rows = parsed.slots.map(function(n) {
+        var entry = parsed.kind === "v2" ? parsed.data.slots[n] : parsed.data;
+        var cur = current[n - 1];
+        return { slot:n,
+            current: cur && cur.hasData ? { summary:cur.summary, date:cur.date } : null,
+            next: buildSlotSummary(entry.p, entry.g) };
+    });
+    var d = parsed.data, globals = [];
+    if (parsed.kind === "v2") {
+        if (d.achievements || d.stats) globals.push("업적·통계");
+        if (Array.isArray(d.graveyard)) globals.push("묘지");
+        if (d.codex) globals.push("도감");
+        if (d.starShop) globals.push("별의 파편 상점");
+    }
+    await loadRestorePointInfo();
+    _importPreview = { code:String(code), kind:parsed.kind, rows:rows, globals:globals, main:parsed.kind === "v1" };
+    _transferMode = "importPreview";
+    render();
+    return _importPreview;
+}
+
+function renderImportPreview() {
+    var pv = _importPreview;
+    if (!pv) return '';
+    var html = '<div style="font-weight:bold;color:#68d391;font-size:13px;margin-bottom:6px;">📥 가져오기 미리보기</div>' +
+        '<div style="font-size:10px;color:rgba(255,255,255,0.6);margin-bottom:8px;line-height:1.5;">아래 슬롯이 코드 내용으로 교체됩니다. 교체 직전 내용은 복원 지점 1개에 보관되며, 📂 슬롯 메뉴의 <b>되돌리기</b>로 복구할 수 있습니다.</div>';
+    for (var i = 0; i < pv.rows.length; i++) {
+        var r = pv.rows[i];
+        html += '<div style="padding:6px 8px;margin:4px 0;border:1px solid rgba(255,255,255,0.15);border-radius:8px;background:rgba(255,255,255,0.03);">' +
+            '<div style="font-size:12px;font-weight:bold;color:#fbd38d;">슬롯 ' + r.slot + '</div>' +
+            '<div style="font-size:10px;color:' + (r.current ? '#fc8181' : 'rgba(255,255,255,0.4)') + ';">현재: ' + (r.current ? escHtml(r.current.summary) + ' <span style="color:rgba(255,255,255,0.4);">' + escHtml(r.current.date) + '</span>' : '(비어 있음)') + '</div>' +
+            '<div style="font-size:10px;color:#68d391;">새 코드: ' + escHtml(r.next) + '</div></div>';
+    }
+    if (pv.main) html += '<div style="font-size:10px;color:#fbd38d;margin-top:4px;">⚠️ 구형 코드라 이어하기 저장도 이 캐릭터로 바뀝니다.</div>';
+    if (pv.globals.length) html += '<div style="font-size:10px;color:#fbd38d;margin-top:4px;">⚠️ ' + pv.globals.join(", ") + ' 기록도 코드 내용으로 교체됩니다. (되돌리기에 함께 보관)</div>';
+    if (_restorePointInfo) html += '<div style="font-size:10px;color:rgba(255,255,255,0.45);margin-top:4px;">이전 복원 지점은 이번 교체 직전 상태로 대체됩니다.</div>';
+    html += '<div style="display:flex;gap:6px;margin-top:8px;">' +
+        '<button class="rpg-btn" style="flex:1;background:rgba(104,211,145,0.2);border:1px solid rgba(104,211,145,0.5);color:#68d391;padding:10px;" data-action="rpg_confirmImport">✅ 교체하기</button>' +
+        '<button class="rpg-btn" style="flex:1;background:rgba(144,205,244,0.15);border:1px solid rgba(144,205,244,0.4);color:#90cdf4;padding:10px;" data-action="rpg_closeTransfer">✕ 취소</button></div>';
+    return html;
+}
+
+function renderRestorePointPanel() {
+    if (!_restorePointInfo || _slotFullPickMode) return '';
+    var d = new Date(_restorePointInfo.timestamp);
+    var when = (d.getMonth()+1) + "/" + d.getDate() + " " + String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0");
+    var html = '<div style="margin-top:8px;padding:8px;border:1px dashed rgba(251,211,141,0.4);border-radius:8px;background:rgba(251,211,141,0.05);">' +
+        '<div style="font-size:11px;color:#fbd38d;font-weight:bold;">↩️ 가져오기 되돌리기</div>' +
+        '<div style="font-size:10px;color:rgba(255,255,255,0.5);margin:2px 0 6px;">' + when + ' 가져오기 직전 상태 · 슬롯 ' + _restorePointInfo.slots.join(", ") + (_restorePointInfo.main ? ' · 이어하기' : '') + (_restorePointInfo.globals ? ' · 전역 기록' : '') + '</div>';
+    if (_undoImportConfirm) {
+        html += '<div style="font-size:10px;color:#fc8181;margin-bottom:6px;">가져온 뒤 이 슬롯에서 진행한 내용도 사라집니다. 되돌릴까요?</div>' +
+            '<div style="display:flex;gap:6px;"><button class="rpg-btn" style="flex:1;padding:6px;font-size:11px;background:rgba(252,129,129,0.2);border:1px solid rgba(252,129,129,0.4);color:#fc8181;" data-action="rpg_undoImport">↩️ 되돌리기</button>' +
+            '<button class="rpg-btn" style="flex:1;padding:6px;font-size:11px;background:rgba(144,205,244,0.15);border:1px solid rgba(144,205,244,0.4);color:#90cdf4;" data-action="rpg_undoImportCancel">취소</button></div>';
+    } else {
+        html += '<button class="rpg-btn full" style="padding:6px;font-size:11px;background:rgba(251,211,141,0.12);border:1px solid rgba(251,211,141,0.35);color:#fbd38d;" data-action="rpg_undoImportAsk">↩️ 되돌리기</button>';
+    }
+    return html + '</div>';
+}
+
 async function importSaveCode(code) {
     try {
         if (gameState && gameState.running) { showToast("진행 중인 게임을 종료한 뒤 가져오세요."); return; }
         await _saveQueue;
-        code = code.trim().replace(/\s+/g, '');
-        var json = base64ToUtf8(code);
-        var data = JSON.parse(json);
+        var parsed = parseSaveCode(code);
+        var data = parsed.data;
 
-        if (!data || typeof data !== "object") throw new Error("잘못된 저장 코드");
-        // v2: 전체 슬롯 불러오기
-        if (data.v === 2 && data.slots) {
-            var slotIds = Object.keys(data.slots);
-            if (!slotIds.length || slotIds.some(function(id){ return !validSlot(Number(id)) || String(Number(id)) !== id; })) throw new Error("슬롯 범위는 1~5입니다");
-            slotIds.forEach(function(id){ var entry=data.slots[id]; validateSavePair(entry && entry.p, entry && entry.g); });
+        // v2: 전체 슬롯 불러오기 (검증은 parseSaveCode에서 쓰기 전에 끝남)
+        if (parsed.kind === "v2") {
             try {
-                var count = 0;
-                for (var si in data.slots) {
-                    var sd = data.slots[si];
-                    if (!sd.p || !sd.g) continue;
-                    var slotData = JSON.stringify({
+                var writes = parsed.slots.map(function(n) {
+                    var sd = data.slots[n];
+                    return { slot:n, raw: JSON.stringify({
                         player: JSON.stringify(sd.p),
                         gameState: JSON.stringify(sd.g),
                         timestamp: Date.now(),
-                        summary: (sd.g.difficulty&&DIFFICULTY_DEFS[sd.g.difficulty]?DIFFICULTY_DEFS[sd.g.difficulty].icon+" ":"") + sd.p.icon + " " + sd.p.name + " Lv." + sd.p.level + " " + (sd.g.floor||1) + "F"
-                    });
-                    if (_hasRisu) { await Risuai.setArgument(slotKey(Number(si)), slotData); }
-                    else { localStorage.setItem(slotKey(Number(si)), slotData); }
-                    count++;
-                }
+                        summary: buildSlotSummary(sd.p, sd.g)
+                    }) };
+                });
+                var touchesGlobals = !!(data.achievements || data.stats || Array.isArray(data.graveyard) || data.codex || data.starShop);
+                var globalsBefore = touchesGlobals ? snapshotGlobalRecords() : null;
+                var slotsOk = await enqueueSave(async function() {
+                    await writeRestorePoint(parsed.slots, { globals: globalsBefore });
+                    for (var wi = 0; wi < writes.length; wi++) await writeSaveValue(slotKey(writes[wi].slot), writes[wi].raw);
+                });
+                if (!slotsOk) throw new Error("슬롯 저장 실패");
+                var count = writes.length;
                 // 업적/통계 복원
                 if (data.achievements) { _achievements = data.achievements; }
                 if (data.stats) { _achievementStats = data.stats; }
@@ -4760,7 +4921,7 @@ async function importSaveCode(code) {
                 if (data.starShop) { _starShop = data.starShop; await saveStarShop(); }
                 await saveAchievements();
                 // 가져온 슬롯만 저장하고 메인 메뉴에서 사용자가 선택한다.
-                showToast("✅ " + count + "개 슬롯 + 업적 + 묘지 + 도감 불러오기 성공!");
+                showToast("✅ " + count + "개 슬롯 + 업적 + 묘지 + 도감 불러오기 성공! (📂 슬롯 메뉴에서 되돌리기 가능)");
             } catch(ie) {
                 console.error("[RPG] import v2 error:", ie);
                 showToast("⚠️ 불러오기 중 일부 오류 발생");
@@ -4768,15 +4929,15 @@ async function importSaveCode(code) {
             // 메인화면으로
             player = null; gameState = null; currentEnemy = null; battlePhase = "";
             _activeSlot = 0; // 슬롯 미선택 상태로 → 자동저장 방지
-            _transferMode = null; _transferCode = null;
+            _transferMode = null; _transferCode = null; _importPreview = null;
             _statsOpen = false; _achievementOpen = false; _slotMenuOpen = false; _graveyardOpen = false; _codexOpen = false;
             render();
             return;
         }
 
         // v1 호환: 단일 세이브
-        if (data.p && data.g) {
-            validateSavePair(data.p, data.g);
+        if (parsed.kind === "v1") {
+            if (!await enqueueSave(function(){ return writeRestorePoint([1], { main:true }); })) return;
             player = data.p;
             gameState = data.g;
             if (player && player.equipment && !player.equipped) migrateToSlotSystem();
@@ -4793,15 +4954,15 @@ async function importSaveCode(code) {
             // 메인화면으로
             player = null; gameState = null; currentEnemy = null; battlePhase = "";
             _activeSlot = 0; // 슬롯 미선택 → 자동저장 방지
-            _transferMode = null; _transferCode = null;
+            _transferMode = null; _transferCode = null; _importPreview = null;
             _statsOpen = false; _achievementOpen = false; _slotMenuOpen = false; _graveyardOpen = false; _codexOpen = false;
             render();
             return;
         }
 
         showToast("❌ 잘못된 코드!");
-        _transferMode = null; _transferCode = null; render();
-    } catch(e) { showToast("❌ 코드 파싱 실패!"); console.error(e); _transferMode = null; _transferCode = null; render(); }
+        _transferMode = null; _transferCode = null; _importPreview = null; render();
+    } catch(e) { showToast("❌ 코드 파싱 실패!"); console.error(e); _transferMode = null; _transferCode = null; _importPreview = null; render(); }
 }
 
 var _slotMenuOpen = false;
@@ -15082,6 +15243,7 @@ function getOverlayHTML() {
         content = '<div style="'+panelStyle+'border:1px solid rgba(144,205,244,0.4);">'+
             '<div style="font-weight:bold;color:#fbd38d;font-size:14px;text-align:center;margin-bottom:8px;">📂 캐릭터 슬롯</div>'+
             renderSlotList()+
+            renderRestorePointPanel()+
             '<button class="rpg-btn full" style="margin-top:10px;background:rgba(144,205,244,0.15);border:1px solid rgba(144,205,244,0.4);color:#90cdf4;padding:10px;" data-action="rpg_closeSlotMenu">✕ 닫기</button>'+
             '</div>';
     }
@@ -15114,8 +15276,10 @@ function getOverlayHTML() {
         } else if (_transferMode === "import") {
             tc = '<div style="font-weight:bold;color:#68d391;font-size:13px;margin-bottom:6px;">📥 코드 불러오기</div>'+
                 '<textarea id="rpg-import-area" placeholder="이전 코드를 붙여넣으세요..." style="width:100%;height:80px;background:rgba(0,0,0,0.4);color:#fff;border:1px solid rgba(104,211,145,0.4);border-radius:6px;font-size:10px;padding:6px;resize:none;"></textarea>'+
-                '<button class="rpg-btn full" style="margin-top:6px;background:rgba(104,211,145,0.2);border:1px solid rgba(104,211,145,0.5);color:#68d391;padding:10px;" data-action="rpg_doImport">✅ 불러오기</button>'+
+                '<button class="rpg-btn full" style="margin-top:6px;background:rgba(104,211,145,0.2);border:1px solid rgba(104,211,145,0.5);color:#68d391;padding:10px;" data-action="rpg_doImport">🔍 미리보기</button>'+
                 '<button class="rpg-btn full" style="margin-top:6px;background:rgba(144,205,244,0.15);border:1px solid rgba(144,205,244,0.4);color:#90cdf4;padding:10px;" data-action="rpg_closeTransfer">✕ 닫기</button>';
+        } else if (_transferMode === "importPreview") {
+            tc = renderImportPreview();
         }
         content = '<div style="'+panelStyle+'border:1px solid rgba(183,148,244,0.4);">'+tc+'</div>';
     }
@@ -15666,6 +15830,7 @@ window.rpg_openSlotMenu = async function(){
         showToast("⚔️ 전투 중에는 슬롯을 변경할 수 없습니다!"); return;
     }
     _slotSummaries = await getSlotSummaries();
+    await loadRestorePointInfo(); _undoImportConfirm = false;
     _slotConfirmDelete = null;
     _slotMenuOpen = true; _codexOpen = false; _graveyardOpen = false; _statsOpen = false; _achievementOpen = false;
     render();
@@ -15999,12 +16164,16 @@ window.rpg_slotDeleteCancel = function(){ _slotConfirmDelete = null; render(); }
 window.rpg_slotDeleteConfirm = function(n){ deleteSlot(n); };
 // ─── 이전 코드 핸들러 ───
 window.rpg_openTransfer = function(){ _transferMode = "choose"; _transferCode = null; render(); };
-window.rpg_closeTransfer = function(){ _transferMode = null; _transferCode = null; _importTargetSlot = 0; render(); };
+window.rpg_closeTransfer = function(){ _transferMode = null; _transferCode = null; _importTargetSlot = 0; _importPreview = null; render(); };
+window.rpg_confirmImport = function(){ var c = _importPreview && _importPreview.code; _importPreview = null; if (c) importSaveCode(c); };
+window.rpg_undoImportAsk = function(){ _undoImportConfirm = true; render(); };
+window.rpg_undoImportCancel = function(){ _undoImportConfirm = false; render(); };
+window.rpg_undoImport = function(){ _undoImportConfirm = false; undoImport(); };
 window.rpg_exportCode = function(){ exportSaveCode(); };
 window.rpg_importCodeShow = function(){ _transferMode = "import"; render(); };
 window.rpg_doImport = function(){
     var ta = document.getElementById("rpg-import-area");
-    if (ta && ta.value.trim()) { importSaveCode(ta.value.trim()); }
+    if (ta && ta.value.trim()) { previewImportCode(ta.value.trim()); }
     else { showToast("코드를 붙여넣으세요!"); }
 };
 window.rpg_copyExport = function(){
@@ -16014,7 +16183,7 @@ window.rpg_copyExport = function(){
 window.rpg_startImport = function(){ _transferMode = "import"; _transferCode = null; render(); };
 window.rpg_importCode = function(){
     var ta = document.getElementById("rpg-import-code");
-    if (ta && ta.value.trim()) { importSaveCode(ta.value); }
+    if (ta && ta.value.trim()) { previewImportCode(ta.value); }
     else { showToast("코드를 입력하세요!"); }
 };
 window.rpg_copyCode = function(){

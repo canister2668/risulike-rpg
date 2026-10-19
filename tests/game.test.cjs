@@ -192,3 +192,34 @@ test('unsupported onUnload does not block action button registration',async t=>h
   getRootDocument:async()=>null,resizeContainer:async()=>{},showContainer:async()=>{},hideContainer:async()=>{}});
  await initRPG(); assert.equal(registered,1);
 `,{risu:true}));
+test('import preview compares slots without writing and restore point undoes overwrite',async t=>harness(t,setup+`
+ _graveyard=[{className:'old grave'}]; await saveAll(); const oldRaw=store.get(slotKey(1));
+ const p=createPlayer('mage'), g=createGameState(); p.name='<b>x</b>'; g.floor=4;
+ const keep={p:JSON.parse(JSON.stringify(player)),g:JSON.parse(JSON.stringify(gameState))};
+ player=null; gameState=null; _activeSlot=0;
+ const code=utf8ToBase64(JSON.stringify({v:2,slots:{1:{p,g},3:keep},graveyard:[{className:'new grave'}]}));
+ const pv=await previewImportCode(code);
+ assert.equal(store.get(slotKey(1)),oldRaw); assert.equal(store.has(slotKey(3)),false); assert.equal(store.has(KEY_RESTORE_POINT),false);
+ assert.equal(_transferMode,'importPreview'); assert.deepEqual(pv.rows.map(r=>r.slot),[1,3]);
+ assert.ok(pv.rows[0].current.summary.includes('Lv.')); assert.equal(pv.rows[1].current,null); assert.deepEqual(pv.globals,['묘지']);
+ const html=renderImportPreview(); assert.ok(html.includes('&lt;b&gt;x')); assert.ok(!html.includes('<b>x</b>')); assert.ok(html.includes('4F')); assert.ok(html.includes('rpg_confirmImport'));
+ rpg_confirmImport(); await new Promise(r=>window.setTimeout(r,60)); await _saveQueue;
+ assert.equal(JSON.parse(JSON.parse(store.get(slotKey(1))).player).classKey,'mage'); assert.equal(_graveyard[0].className,'new grave');
+ const rp=JSON.parse(store.get(KEY_RESTORE_POINT)); assert.equal(rp.slots[1],oldRaw); assert.equal(rp.slots[3],null);
+ await loadRestorePointInfo(); assert.deepEqual(_restorePointInfo.slots,[1,3]); assert.ok(renderRestorePointPanel().includes('rpg_undoImportAsk'));
+ assert.equal(await undoImport(),true);
+ assert.equal(store.get(slotKey(1)),oldRaw); assert.equal(store.get(slotKey(3)),''); assert.equal(store.get(KEY_RESTORE_POINT),'');
+ assert.equal(_graveyard[0].className,'old grave'); assert.equal(_restorePointInfo,null);
+`,{risu:true}));
+test('v1 import restore point covers continue save; preview refuses bad code and running game',async t=>harness(t,setup+`
+ await saveAll(); const mainBefore=store.get(KEY_PLAYER);
+ const p=createPlayer('mage'), g=createGameState();
+ assert.equal(await previewImportCode('not base64!!'),null); assert.equal(_importPreview,null);
+ gameState.running=true; assert.equal(await previewImportCode(utf8ToBase64(JSON.stringify({p,g}))),null);
+ player=null; gameState=null; _activeSlot=0;
+ await importSaveCode(utf8ToBase64(JSON.stringify({p,g})));
+ assert.equal(JSON.parse(store.get(KEY_PLAYER)).classKey,'mage');
+ assert.equal(JSON.parse(store.get(KEY_RESTORE_POINT)).main.player,mainBefore);
+ assert.equal(await undoImport(),true); assert.equal(store.get(KEY_PLAYER),mainBefore);
+ assert.equal(JSON.parse(JSON.parse(store.get(slotKey(1))).player).classKey,'warrior');
+`,{risu:true}));
