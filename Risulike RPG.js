@@ -4491,6 +4491,7 @@ async function loadGame() {
     if (player && player.equipment && !player.equipped) migrateToSlotSystem();
     ensurePlayerSlotData(player);
     recalcEquipCache();
+    await restoreRestContext();
     return true;
 }
 
@@ -4545,6 +4546,14 @@ async function writeSaveValue(key, value) {
 }
 function validSlot(n) { return Number.isInteger(n) && n >= 1 && n <= SLOT_COUNT; }
 function validateSavePair(p, g) {
+    // 구버전 세이브에 빠질 수 있는 보조 필드는 기본값으로 채우고, 복구 불가능한 핵심 필드만 거부한다.
+    if (p && typeof p === "object" && g && typeof g === "object") {
+        if (!Array.isArray(g.log)) g.log = [];
+        if (typeof g.phase !== "string") g.phase = "chooseDoor";
+        if (typeof g.floor === "string" && /^\d+$/.test(g.floor)) g.floor = Number(g.floor);
+        if (!Array.isArray(p.skills)) p.skills = [];
+        if (!Number.isFinite(p.hp) && Number.isFinite(p.maxHp)) p.hp = p.maxHp;
+    }
     if (!p || typeof p !== "object" || !g || typeof g !== "object" ||
         !Object.hasOwn(PLAYER_CLASSES, p.classKey) || !p.abilities || !Array.isArray(p.skills) ||
         !Array.isArray(g.log) || !Number.isFinite(p.hp) || !Number.isFinite(p.maxHp) || p.maxHp <= 0 ||
@@ -4596,6 +4605,7 @@ async function loadFromSlot(n) {
             addLog("⚠️ 전투 중 중단됨 — 문 선택으로 돌아갑니다.", "info");
         }
         _activeSlot = n;
+        await restoreRestContext();
         await saveAll(); // 메인 세이브에도 반영
         showToast("📂 슬롯 " + n + " 불러오기!");
         // 모든 오버레이 닫기
@@ -16423,11 +16433,16 @@ async function showRpgContainer() {
 async function initRPG() {
     console.log(PLUGIN_NAME+" 초기화 (v0.1, API 3.0)", _hasRisu ? "[Risu 환경]" : "[독립 실행]");
 
-    if (_hasRisu) await Risuai.onUnload(async function() {
-        clearInterval(_iconWatchTimer);
-        if (_audioCtx) await _audioCtx.close();
-        await clearRestContext();
-    });
+    // onUnload 미지원 호스트에서도 초기화와 버튼 등록은 계속한다.
+    if (_hasRisu) {
+        try {
+            await Risuai.onUnload(async function() {
+                clearInterval(_iconWatchTimer);
+                if (_audioCtx) await _audioCtx.close();
+                await clearRestContext();
+            });
+        } catch(e) { console.warn(PLUGIN_NAME, "onUnload 등록 실패:", e); }
+    }
 
     // UI 가시성 복원
     isWindowVisible = (await lsGet(KEY_VISIBLE)) !== "false";
@@ -16599,6 +16614,16 @@ function _buildRpgBlock() {
         "<!--RPG_END-->";
 }
 
+// 마지막 user 메시지 바로 앞에 넣는다. 뒤에 붙이면 프리셋의 assistant 프리필이 깨진다.
+function insertRestContext(messages, contextMessage) {
+    for (var i = messages.length - 1; i >= 0; i--) {
+        if (messages[i] && messages[i].role === "user") return messages.slice(0, i).concat([contextMessage], messages.slice(i));
+    }
+    var tail = messages.length;
+    while (tail > 0 && messages[tail - 1] && messages[tail - 1].role === "assistant") tail--;
+    return messages.slice(0, tail).concat([contextMessage], messages.slice(tail));
+}
+
 // Request-scoped context: never persist temporary rest text into a bot card.
 var _restRequestHandler = null;
 var _restCharacterId = null;
@@ -16613,10 +16638,21 @@ async function registerRestContext() {
         var selected = await Risuai.getCharacter();
         if (!selected || selected.chaId !== _restCharacterId) return messages;
         var context = _buildRpgBlock();
-        return context ? messages.filter(function(m){ return !(m.role === "system" && typeof m.content === "string" && m.content.startsWith("\n<!--RPG_START-->\n[Dungeon Rest")); }).concat([{role:"system",content:context}]) : messages;
+        if (!context) return messages;
+        var out = messages.filter(function(m){ return !(m.role === "system" && typeof m.content === "string" && m.content.startsWith("\n<!--RPG_START-->\n[Dungeon Rest")); });
+        return insertRestContext(out, {role:"system", content:context});
     };
     try { await Risuai.addRisuReplacer("beforeRequest", _restRequestHandler); }
     catch(e) { _restRequestHandler = null; _restCharacterId = null; throw e; }
+}
+// 휴식 중에 저장된 게임을 다시 불러오면 요청 문맥도 다시 연결한다. 실패하면 휴식을 해제해 화면과 채팅 상태를 맞춘다.
+async function restoreRestContext() {
+    if (!gameState || !gameState._resting) return;
+    try { await registerRestContext(); }
+    catch(e) {
+        gameState._resting = false;
+        console.warn(PLUGIN_NAME, "휴식 문맥 복원 실패:", e);
+    }
 }
 async function clearRestContext() {
     _restCharacterId = null;

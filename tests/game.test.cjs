@@ -125,7 +125,7 @@ test('rest context is request-only, character-scoped and retry-safe',async t=>ha
  await startRest(); assert.equal(gameState._resting,true);
  const messages=[{role:'user',content:'hello'}];
  const result=await handler(messages,'model'); assert.equal(result.length,2); assert.equal(messages.length,1);
- assert.ok(result[1].content.includes('기사'));
+ assert.equal(result[0].role,'system'); assert.ok(result[0].content.includes('기사')); assert.equal(result[1].content,'hello');
  assert.equal((await handler(result,'model')).length,2);
  assert.equal((await handler(messages,'submodel')).length,1);
  id='different'; assert.equal((await handler(messages,'model')).length,1);
@@ -161,3 +161,34 @@ test('content registry references resolve',async t=>harness(t,`
  assert.ok(Object.keys(PLAYER_CLASSES).length>0);
  report(JSON.stringify({classes:Object.keys(PLAYER_CLASSES).length,skills:Object.keys(SKILL_DEFS).length,passives:Object.keys(PASSIVE_DEFS).length,equipment:EQUIP_DB.length,enemies:Object.keys(ENEMY_TEMPLATES).length}));
 `));
+test('rest context keeps assistant prefill as the final message',async t=>harness(t,setup+`
+ let handler; Risuai.getCharacter=async()=>({chaId:'owner'}); Risuai.addRisuReplacer=async(type,fn)=>{handler=fn};
+ await startRest();
+ const result=await handler([{role:'system',content:'main'},{role:'user',content:'hi'},{role:'assistant',content:'prefill'}],'model');
+ assert.deepEqual(result.map(m=>m.role),['system','system','user','assistant']);
+ assert.equal(result[3].content,'prefill');
+ const noUser=await handler([{role:'system',content:'main'},{role:'assistant',content:'prefill'}],'model');
+ assert.deepEqual(noUser.map(m=>m.role),['system','system','assistant']);
+`,{risu:true}));
+test('resting save reattaches request context on slot load',async t=>harness(t,setup+`
+ let added=0; Risuai.getCharacter=async()=>({chaId:'owner'}); Risuai.addRisuReplacer=async()=>{added++};
+ gameState._resting=true; await saveAll(); const raw=store.get(slotKey(1));
+ player=null; gameState=null; store.set(slotKey(1),raw);
+ await loadFromSlot(1); assert.equal(gameState._resting,true); assert.equal(added,1);
+ Risuai.getCharacter=async()=>null; _restRequestHandler=null; gameState._resting=true;
+ await restoreRestContext(); assert.equal(gameState._resting,false);
+`,{risu:true}));
+test('legacy slot missing auxiliary fields still loads',async t=>harness(t,setup+`
+ const p=JSON.parse(JSON.stringify(player)), g=JSON.parse(JSON.stringify(gameState));
+ delete g.log; delete g.phase; delete p.hp; g.floor='3';
+ store.set(slotKey(2),JSON.stringify({player:JSON.stringify(p),gameState:JSON.stringify(g),timestamp:1,summary:''}));
+ player=null; gameState=null; await loadFromSlot(2);
+ assert.equal(gameState.floor,3); assert.equal(gameState.phase,'chooseDoor'); assert.ok(Array.isArray(gameState.log));
+ assert.equal(player.hp,player.maxHp);
+`,{risu:true}));
+test('unsupported onUnload does not block action button registration',async t=>harness(t,`
+ let registered=0;
+ Object.assign(Risuai,{onUnload:async()=>{throw new Error('unsupported')},registerButton:async()=>{registered++},
+  getRootDocument:async()=>null,resizeContainer:async()=>{},showContainer:async()=>{},hideContainer:async()=>{}});
+ await initRPG(); assert.equal(registered,1);
+`,{risu:true}));
