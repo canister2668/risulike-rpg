@@ -4982,7 +4982,12 @@ async function importSaveCode(code) {
                 if (data.starShop) { _starShop = data.starShop; await saveStarShop(); }
                 await saveAchievements();
                 // 가져온 슬롯만 저장하고 메인 메뉴에서 사용자가 선택한다.
-                showToast("✅ " + count + "개 슬롯 + 업적 + 묘지 + 도감 불러오기 성공! (📂 슬롯 메뉴에서 되돌리기 가능)");
+                var _imported = [count + "개 슬롯"];
+                if (data.achievements || data.stats) _imported.push("업적");
+                if (Array.isArray(data.graveyard)) _imported.push("묘지");
+                if (data.codex) _imported.push("도감");
+                if (data.starShop) _imported.push("별 상점");
+                showToast("✅ " + _imported.join(" + ") + " 불러오기 성공! (📂 슬롯 메뉴에서 되돌리기 가능)");
             } catch(ie) {
                 console.error("[RPG] import v2 error:", ie);
                 showToast("⚠️ 불러오기 중 일부 오류 발생");
